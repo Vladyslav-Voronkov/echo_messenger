@@ -111,9 +111,11 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     });
     socketRef.current = socket;
 
-    socket.on('connect', () => {
+    socket.on('connect', async () => {
       setStatus('online');
-      socket.emit('join', { roomId });
+      // Send encrypted nick so server can broadcast join/leave notifications
+      const encNick = await encryptNick(cryptoKey, nickname);
+      socket.emit('join', { roomId, nick: encNick });
       loadHistory();
     });
     socket.on('disconnect', () => {
@@ -167,8 +169,42 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       setLikes(prev => ({ ...prev, [msgTs]: nicks }));
     });
 
-    socket.on('pins_updated', ({ pins: updatedPins }) => {
+    socket.on('pins_updated', async ({ pins: updatedPins, action, byNick }) => {
       if (Array.isArray(updatedPins)) setPins(updatedPins);
+      // Show pin/unpin notification
+      if (action && byNick) {
+        try {
+          const plainNick = await decryptNick(cryptoKey, byNick);
+          const text = action === 'pin'
+            ? `📌 ${plainNick} закрепил(а) сообщение`
+            : `📌 ${plainNick} открепил(а) сообщение`;
+          setMessages(prev => [
+            ...prev,
+            { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text, ts: Date.now() },
+          ]);
+        } catch { /* ignore */ }
+      }
+    });
+
+    socket.on('user_joined', async ({ nick: encNick }) => {
+      try {
+        const plainNick = await decryptNick(cryptoKey, encNick);
+        if (plainNick === nickname) return; // don't show own join
+        setMessages(prev => [
+          ...prev,
+          { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text: `${plainNick} присоединился(-ась)`, ts: Date.now() },
+        ]);
+      } catch { /* ignore decrypt errors */ }
+    });
+
+    socket.on('user_left', async ({ nick: encNick }) => {
+      try {
+        const plainNick = await decryptNick(cryptoKey, encNick);
+        setMessages(prev => [
+          ...prev,
+          { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text: `${plainNick} покинул(а) чат`, ts: Date.now() },
+        ]);
+      } catch { /* ignore decrypt errors */ }
     });
 
     return () => socket.disconnect();
@@ -236,12 +272,17 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     });
   }, [nickname, roomId]);
 
-  // Toggle pin/unpin on a message
-  const handlePin = useCallback((msg) => {
+  // Toggle pin/unpin on a message (send encrypted nick for notification)
+  const handlePin = useCallback(async (msg) => {
     if (!socketRef.current?.connected) return;
     const already = pins.some(p => p.ts === msg.ts);
-    socketRef.current.emit(already ? 'unpin' : 'pin', { roomId, msgTs: msg.ts });
-  }, [pins, roomId]);
+    try {
+      const encNick = await encryptNick(cryptoKey, nickname);
+      socketRef.current.emit(already ? 'unpin' : 'pin', { roomId, msgTs: msg.ts, nick: encNick });
+    } catch {
+      socketRef.current.emit(already ? 'unpin' : 'pin', { roomId, msgTs: msg.ts });
+    }
+  }, [pins, roomId, cryptoKey, nickname]);
 
   // Navigate pinned messages (delta = +1 or -1)
   const handleChangePin = useCallback((delta) => {

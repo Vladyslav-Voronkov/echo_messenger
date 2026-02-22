@@ -358,17 +358,21 @@ function getRoomCount(roomId) {
 
 io.on('connection', (socket) => {
   let currentRoom = null;
+  let currentNick = null;
 
-  socket.on('join', ({ roomId }) => {
+  socket.on('join', ({ roomId, nick }) => {
     if (!isValidRoomId(roomId)) {
       socket.emit('error', { message: 'Invalid room ID' });
       return;
     }
     currentRoom = roomId;
+    currentNick = nick || null; // encrypted nick for join/leave notifications
     socket.join(roomId);
     if (!roomMembers.has(roomId)) roomMembers.set(roomId, new Set());
     roomMembers.get(roomId).add(socket.id);
     io.to(roomId).emit('online_count', { count: getRoomCount(roomId) });
+    // Notify others that someone joined (encrypted nick)
+    if (nick) socket.to(roomId).emit('user_joined', { nick });
     // Send current pins to newly joined socket
     const pins = [...(roomPins.get(roomId)?.values() ?? [])].sort((a, b) => a.ts - b.ts);
     if (pins.length > 0) socket.emit('pins_updated', { pins });
@@ -445,20 +449,20 @@ io.on('connection', (socket) => {
     saveLikes().catch(() => {});
   });
 
-  socket.on('pin', ({ roomId, msgTs }) => {
+  socket.on('pin', ({ roomId, msgTs, nick }) => {
     if (!isValidRoomId(roomId) || typeof msgTs !== 'number') return;
     if (!roomPins.has(roomId)) roomPins.set(roomId, new Map());
     roomPins.get(roomId).set(String(msgTs), { ts: msgTs, pinnedAt: Date.now() });
     const pins = [...roomPins.get(roomId).values()].sort((a, b) => a.ts - b.ts);
-    io.to(roomId).emit('pins_updated', { pins });
+    io.to(roomId).emit('pins_updated', { pins, action: 'pin', byNick: nick || null });
     savePins().catch(() => {});
   });
 
-  socket.on('unpin', ({ roomId, msgTs }) => {
+  socket.on('unpin', ({ roomId, msgTs, nick }) => {
     if (!isValidRoomId(roomId) || typeof msgTs !== 'number') return;
     roomPins.get(roomId)?.delete(String(msgTs));
     const pins = [...(roomPins.get(roomId)?.values() ?? [])].sort((a, b) => a.ts - b.ts);
-    io.to(roomId).emit('pins_updated', { pins });
+    io.to(roomId).emit('pins_updated', { pins, action: 'unpin', byNick: nick || null });
     savePins().catch(() => {});
   });
 
@@ -467,6 +471,8 @@ io.on('connection', (socket) => {
       roomMembers.get(currentRoom).delete(socket.id);
       const count = getRoomCount(currentRoom);
       io.to(currentRoom).emit('online_count', { count });
+      // Notify others that someone left (encrypted nick)
+      if (currentNick) socket.to(currentRoom).emit('user_left', { nick: currentNick });
       if (count === 0) roomMembers.delete(currentRoom);
     }
   });

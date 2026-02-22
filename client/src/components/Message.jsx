@@ -23,6 +23,14 @@ function parseMessage(raw) {
 }
 
 export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike, pins, onPin }) {
+  // System notification messages (join/leave/pin)
+  if (message.type === 'system') {
+    return (
+      <div className="system-message">
+        <span className="system-message-text">{message.text}</span>
+      </div>
+    );
+  }
   const [hovered, setHovered] = useState(false);
   const { nick, ts, isOwn } = message;
   const parsed = parseMessage(message.text);
