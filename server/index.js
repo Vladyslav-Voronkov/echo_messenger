@@ -277,6 +277,9 @@ const io = new Server(httpServer, {
 // Map<roomId, Set<socketId>>
 const roomMembers = new Map();
 
+// Map<roomId, Map<encryptedNick, upToTs>> — read receipts (in-memory only)
+const readReceipts = new Map();
+
 function getRoomCount(roomId) {
   return roomMembers.get(roomId)?.size ?? 0;
 }
@@ -335,6 +338,14 @@ io.on('connection', (socket) => {
   socket.on('stop_typing', ({ roomId, nick }) => {
     if (!isValidRoomId(roomId) || typeof nick !== 'string') return;
     socket.to(roomId).emit('stop_typing', { nick });
+  });
+
+  socket.on('read', ({ roomId, nick, upToTs }) => {
+    if (!isValidRoomId(roomId) || typeof nick !== 'string' || typeof upToTs !== 'number') return;
+    if (!readReceipts.has(roomId)) readReceipts.set(roomId, new Map());
+    readReceipts.get(roomId).set(nick, upToTs);
+    // Broadcast to everyone in room (including sender — needed for multi-device)
+    io.to(roomId).emit('read_by', { nick, upToTs });
   });
 
   socket.on('disconnect', () => {

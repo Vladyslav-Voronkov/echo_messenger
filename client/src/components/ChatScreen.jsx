@@ -20,6 +20,8 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const [highlightId, setHighlightId] = useState(null);
   const [typingUsers, setTypingUsers] = useState(new Set());
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [readReceipts, setReadReceipts] = useState({});
+  // { encryptedNick: upToTs } — tracks who read up to which timestamp
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const messagesAreaRef = useRef(null);
@@ -35,6 +37,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   }, [roomId]);
 
   // Scroll to bottom: instant on first load, smooth on new messages if near bottom
+  // Also send read receipt whenever new messages arrive
   useEffect(() => {
     const added = messages.length - prevLenRef.current;
     prevLenRef.current = messages.length;
@@ -43,6 +46,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         // Initial history load — jump instantly to bottom (like Telegram)
         initialScrollDoneRef.current = true;
         messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+        sendRead(); // mark all history as read
         return;
       }
       // Live messages — only auto-scroll if user is already near the bottom
@@ -53,8 +57,9 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }
       }
+      sendRead(); // mark newly received messages as read
     }
-  }, [messages]);
+  }, [messages, sendRead]);
 
   const loadHistory = useCallback(async () => {
     if (loadedRef.current) return;
@@ -132,6 +137,11 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       } catch { /* ignore decrypt errors */ }
     });
 
+    socket.on('read_by', ({ nick, upToTs }) => {
+      if (typeof nick !== 'string' || typeof upToTs !== 'number') return;
+      setReadReceipts(prev => ({ ...prev, [nick]: upToTs }));
+    });
+
     return () => socket.disconnect();
   }, [roomId, cryptoKey, nickname, loadHistory]);
 
@@ -182,6 +192,22 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
+
+  // Emit 'read' to server — "I've seen all messages up to the latest one"
+  const sendRead = useCallback(async () => {
+    if (!socketRef.current?.connected || messages.length === 0) return;
+    try {
+      const upToTs = messages[messages.length - 1].ts;
+      const encNick = await encryptNick(cryptoKey, nickname);
+      socketRef.current.emit('read', { roomId, nick: encNick, upToTs });
+    } catch { /* ignore */ }
+  }, [cryptoKey, nickname, roomId, messages]);
+
+  // Send read receipt when window regains focus
+  useEffect(() => {
+    window.addEventListener('focus', sendRead);
+    return () => window.removeEventListener('focus', sendRead);
+  }, [sendRead]);
 
   const statusInfo = {
     connecting: { label: 'Подключение...', cls: 'status-connecting' },
@@ -249,6 +275,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
             socketRef={socketRef}
             roomId={roomId}
             nickname={nickname}
+            readReceipts={readReceipts}
           />
         ))}
         <div ref={messagesEndRef} />

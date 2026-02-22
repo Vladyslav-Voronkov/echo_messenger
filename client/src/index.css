@@ -497,6 +497,27 @@ body {
   opacity: 0.85;
 }
 
+/* ── Read Receipts ──────────────────────────────────────────────────────── */
+.read-receipt {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #4f8ef7;
+  margin-top: 2px;
+  line-height: 1;
+  user-select: none;
+}
+
+.read-receipt-nicks {
+  color: rgba(255,255,255,0.45);
+  font-size: 10px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Message Bubbles ────────────────────────────────────────────────────── */
 .message-row {
   display: flex;
