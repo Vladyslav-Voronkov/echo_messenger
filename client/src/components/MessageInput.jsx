@@ -422,7 +422,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
             <span className="reply-preview-label">↩ Ответ</span>
             <span className="reply-preview-nick">{replyTo.nick}</span>
             <span className="reply-preview-text">
-              {replyTo.text.length > 60 ? replyTo.text.slice(0, 60) + '...' : replyTo.text}
+              {(replyTo.text?.length ?? 0) > 60 ? replyTo.text.slice(0, 60) + '...' : (replyTo.text || '')}
             </span>
           </div>
           <button className="reply-cancel-btn" onClick={onCancelReply} type="button">✕</button>

@@ -142,7 +142,7 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
           >
             <span className="reply-quote-nick">{replyTo.nick}</span>
             <span className="reply-quote-text">
-              {replyTo.text.length > 80 ? replyTo.text.slice(0, 80) + '...' : replyTo.text}
+              {(replyTo.text?.length ?? 0) > 80 ? replyTo.text.slice(0, 80) + '...' : (replyTo.text || '')}
             </span>
           </div>
         )}

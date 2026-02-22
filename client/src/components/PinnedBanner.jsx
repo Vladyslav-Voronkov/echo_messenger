@@ -53,7 +53,7 @@ export default function PinnedBanner({ pins, messages, activePinIdx, onChangePin
   );
 
   const { icon: previewIcon, text: previewText } = getPreviewText(pinnedMsg);
-  const displayText = previewText.length > 60 ? previewText.slice(0, 60) + '...' : previewText;
+  const displayText = typeof previewText === 'string' && previewText.length > 60 ? previewText.slice(0, 60) + '...' : (previewText || '');
   const senderNick = pinnedMsg?.nick || '';
 
   const handleClick = () => {
