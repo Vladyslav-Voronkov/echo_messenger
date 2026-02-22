@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm install:*)",
+      "Bash(cmd /c \"cd C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\client && npm install lucide-react\")",
+      "Bash(cmd /c \"cd /d C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\client && npm install lucide-react --save\")",
+      "Bash(cmd /c \"dir C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\client\")",
+      "Bash(git -C /c/Users/vlady/Desktop/CHAT log --oneline -3)",
+      "Bash(git -C /c/Users/vlady/Desktop/CHAT show --stat HEAD)",
+      "Bash(git -C /c/Users/vlady/Desktop/CHAT diff HEAD~1 HEAD -- client/src/components/ChatScreen.jsx)",
+      "Bash(echo:*)",
+      "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\client\\\\src\\\\components\\\\ChatScreen.jsx'' -TotalCount 30\")",
+      "Bash(dir:*)",
+      "Bash(exit 0)",
+      "Bash(cmd.exe /c \"dir C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\")",
+      "Bash(cmd.exe /c \"dir /A\")",
+      "Bash(powershell.exe -NoProfile -Command \"Get-ChildItem ''C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT'' -Force | Format-Table Name, Length, LastWriteTime, Mode -AutoSize\")",
+      "Bash(powershell.exe -NoProfile -Command \"Get-Content ''C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\railway.json''\")",
+      "Bash(powershell.exe -NoProfile -Command \"Get-Content ''C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\package.json''\")",
+      "Bash(powershell.exe -NoProfile -Command \"if \\(Test-Path ''C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\railway.toml''\\) { Get-Content ''C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\railway.toml'' } else { ''NOT FOUND'' }\")",
+      "Bash(powershell.exe -NoProfile -Command \"if \\(Test-Path ''C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\Dockerfile''\\) { Get-Content ''C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\Dockerfile'' } else { ''NOT FOUND'' }\")",
+      "Bash(powershell.exe -NoProfile -Command:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git -C C:UsersvladyDesktopCHAT diff --stat)",
+      "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\client\\\\src\\\\components\\\\Message.jsx'' | Select-Object -First 15\")",
+      "Bash(powershell -Command:*)",
+      "Bash(git -C:*)"
+    ]
+  }
+}
