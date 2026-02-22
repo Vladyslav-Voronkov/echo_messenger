@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAppKit, useAppKitAccount } from '@reown/appkit/react';
 import { saveWallet, fetchAllUsdtBalances } from '../lib/wallet.js';
-import { truncateAddr, formatUsdt } from './WalletPanel.jsx';
+import { truncateAddr, formatUsdt } from '../lib/walletUtils.js';
 
 export default function WalletPanelActive({ mode }) {
   const { open } = useAppKit();

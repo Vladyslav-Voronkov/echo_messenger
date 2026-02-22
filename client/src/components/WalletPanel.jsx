@@ -1,19 +1,8 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
-import { WC_CONFIGURED, saveWallet, fetchAllUsdtBalances } from '../lib/wallet.js';
-
-function truncateAddr(addr) {
-  if (!addr) return '';
-  return addr.slice(0, 6) + '...' + addr.slice(-4);
-}
-
-function formatUsdt(val) {
-  if (val === null || val === undefined) return '—';
-  const n = parseFloat(val);
-  if (isNaN(n)) return '—';
-  return n.toFixed(2);
-}
+import { lazy, Suspense } from 'react';
+import { WC_CONFIGURED } from '../lib/wallet.js';
 
 // Lazily loaded — only imported when WC_CONFIGURED=true and WagmiProvider is in tree
+// This avoids importing AppKit hooks before the provider is mounted
 const WalletPanelActive = lazy(() => import('./WalletPanelActive.jsx'));
 
 /**
@@ -38,5 +27,3 @@ export default function WalletPanel({ mode = 'full' }) {
     </Suspense>
   );
 }
-
-export { truncateAddr, formatUsdt };
