@@ -2,6 +2,7 @@ import { useState } from 'react';
 import ImageMessage from './ImageMessage.jsx';
 import FileMessage from './FileMessage.jsx';
 import VoiceMessage from './VoiceMessage.jsx';
+import { getNickColor } from '../utils/nickColor.js';
 
 function parseMessage(raw) {
   try {
@@ -22,6 +23,25 @@ function parseMessage(raw) {
   return { type: 'text', text: raw, replyTo: null };
 }
 
+/* ── SVG icons (inline, no external dependency) ─── */
+const IconReply = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 17 4 12 9 7"/>
+    <path d="M20 18v-2a4 4 0 00-4-4H4"/>
+  </svg>
+);
+const IconPin = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="17" x2="12" y2="22"/>
+    <path d="M5 17h14v-1.76a2 2 0 00-1.11-1.79l-1.78-.9A2 2 0 0115 10.76V6h1a2 2 0 000-4H8a2 2 0 000 4h1v4.76a2 2 0 01-1.11 1.79l-1.78.9A2 2 0 005 15.24V17z"/>
+  </svg>
+);
+const IconHeart = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
+  </svg>
+);
+
 export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike, pins, onPin }) {
   // System notification messages (join/leave/pin)
   if (message.type === 'system') {
@@ -34,6 +54,9 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
   const [hovered, setHovered] = useState(false);
   const { nick, ts, isOwn } = message;
   const parsed = parseMessage(message.text);
+
+  // Nick color (deterministic)
+  const nickColor = getNickColor(nick);
 
   // Show ✓✓ if at least one other user read up to (or past) this message's timestamp
   const isRead = isOwn && readReceipts &&
@@ -56,11 +79,11 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
 
   const handleReplyClick = () => {
     const replyText = parsed.type === 'image'
-      ? '📸 Фотография'
+      ? 'Фотография'
       : parsed.type === 'file'
-        ? ('📎 ' + (parsed.fileData && parsed.fileData.name ? parsed.fileData.name : 'Файл'))
+        ? (parsed.fileData && parsed.fileData.name ? parsed.fileData.name : 'Файл')
         : parsed.type === 'voice'
-          ? '🎙 Голосовое сообщение'
+          ? 'Голосовое сообщение'
           : (parsed.text || message.text);
     onReply({ id: message.id, nick, text: replyText });
   };
@@ -78,21 +101,38 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {/* Avatar for other users' messages */}
+      {!isOwn && (
+        <div
+          className="msg-avatar"
+          style={{ background: nickColor }}
+          title={nick}
+        >
+          {nick ? nick[0].toUpperCase() : '?'}
+        </div>
+      )}
+
       {!isOwn && (
         <div className={'msg-actions msg-actions-left' + (hovered ? ' visible' : '')}>
-          <button className="action-btn" onClick={handleReplyClick} title="Ответить">↩</button>
+          <button className="action-btn" onClick={handleReplyClick} title="Ответить">
+            <IconReply />
+          </button>
           {onPin && (
             <button
               className={'action-btn pin-btn' + (isPinned ? ' pinned' : '')}
               onClick={() => onPin(message)}
               title={isPinned ? 'Открепить' : 'Закрепить'}
-            >📌</button>
+            >
+              <IconPin />
+            </button>
           )}
         </div>
       )}
 
       <div className="message-bubble" onDoubleClick={() => onLike(message)}>
-        {!isOwn && <span className="message-nick">{nick}</span>}
+        {!isOwn && (
+          <span className="message-nick" style={{ color: nickColor }}>{nick}</span>
+        )}
 
         {replyTo && (
           <div
@@ -134,14 +174,18 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
               className={'action-btn pin-btn' + (isPinned ? ' pinned' : '')}
               onClick={() => onPin(message)}
               title={isPinned ? 'Открепить' : 'Закрепить'}
-            >📌</button>
+            >
+              <IconPin />
+            </button>
           )}
-          <button className="action-btn" onClick={handleReplyClick} title="Ответить">↩</button>
+          <button className="action-btn" onClick={handleReplyClick} title="Ответить">
+            <IconReply />
+          </button>
         </div>
       )}
       {likes && likes.length > 0 && (
         <div className={'like-badge' + (isOwn ? ' like-badge-own' : '')} onClick={() => onLike(message)}>
-          ❤️
+          <IconHeart />
           {likes.length > 1 && <span className="like-count">{likes.length}</span>}
           {likeNicks.length > 0 && (
             <span className="like-nicks">

@@ -5,6 +5,7 @@ import MessageInput from './MessageInput.jsx';
 import PinnedBanner from './PinnedBanner.jsx';
 import MediaPanel from './MediaPanel.jsx';
 import { encryptMessage, encryptNick, decryptNick, decryptMessageObject } from '../utils/crypto.js';
+import { getNickColor } from '../utils/nickColor.js';
 
 // In dev: Vite proxies /socket.io → localhost:3001 automatically.
 // In production: server serves the built client, so same origin = correct.
@@ -12,8 +13,66 @@ const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
 const BATCH = 50; // messages to render per window
 
+// Suspicious activity: if more than this many distinct join/leave events in this window
+const SUSPICIOUS_EVENT_THRESHOLD = 6;
+const SUSPICIOUS_WINDOW_MS = 60 * 1000; // 1 minute
+
+/* ── SVG icon set for header/buttons ─────────────────────── */
+const IconUsers = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+    <circle cx="9" cy="7" r="4"/>
+    <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+    <path d="M16 3.13a4 4 0 010 7.75"/>
+  </svg>
+);
+const IconMedia = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2"/>
+    <circle cx="8.5" cy="8.5" r="1.5"/>
+    <polyline points="21 15 16 10 5 21"/>
+  </svg>
+);
+const IconUser = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+    <circle cx="12" cy="7" r="4"/>
+  </svg>
+);
+const IconChevronLeft = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 18 9 12 15 6"/>
+  </svg>
+);
+const IconLogout = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+    <polyline points="16 17 21 12 16 7"/>
+    <line x1="21" y1="12" x2="9" y2="12"/>
+  </svg>
+);
+const IconArrowDown = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19"/>
+    <polyline points="19 12 12 19 5 12"/>
+  </svg>
+);
+const IconLock = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0110 0v4"/>
+  </svg>
+);
+const IconWarning = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+    <line x1="12" y1="9" x2="12" y2="13"/>
+    <line x1="12" y1="17" x2="12.01" y2="17"/>
+  </svg>
+);
+
 export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
-  const { nickname, roomId, cryptoKey, chatName, seedShort } = session;
+  const { nickname, roomId, cryptoKey } = session;
   const [messages, setMessages] = useState([]);
   const [visibleCount, setVisibleCount] = useState(BATCH);
   const [onlineCount, setOnlineCount] = useState(0);
@@ -28,6 +87,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const [pins, setPins] = useState([]);
   const [activePinIdx, setActivePinIdx] = useState(0);
   const [showMediaPanel, setShowMediaPanel] = useState(false);
+  const [suspiciousActivity, setSuspiciousActivity] = useState(false);
 
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -39,6 +99,11 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const sendReadRef = useRef(null);
   const likesRef = useRef({});
   const pingIntervalRef = useRef(null);
+  // Rolling window for suspicious activity detection
+  const activityLogRef = useRef([]); // timestamps of join/leave events
+
+  // Nick color for own avatar in header
+  const ownNickColor = getNickColor(nickname);
 
   // Reset visible window and scroll flag when room changes
   useEffect(() => {
@@ -77,6 +142,24 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     setActivePinIdx(prev => (pins.length === 0 ? 0 : Math.min(prev, pins.length - 1)));
   }, [pins]);
 
+  // Track join/leave events for suspicious activity detection
+  const recordActivityEvent = useCallback(() => {
+    const now = Date.now();
+    activityLogRef.current.push(now);
+    // Keep only events within the window
+    activityLogRef.current = activityLogRef.current.filter(t => now - t < SUSPICIOUS_WINDOW_MS);
+    if (activityLogRef.current.length >= SUSPICIOUS_EVENT_THRESHOLD) {
+      setSuspiciousActivity(true);
+      // Auto-dismiss after 30 seconds if no more events
+      setTimeout(() => {
+        const latest = activityLogRef.current;
+        if (!latest.length || Date.now() - latest[latest.length - 1] > 15000) {
+          setSuspiciousActivity(false);
+        }
+      }, 30000);
+    }
+  }, []);
+
   const loadHistory = useCallback(async () => {
     if (loadedRef.current) return;
     loadedRef.current = true;
@@ -95,8 +178,8 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
                 let text = '';
                 if (obj.subtype === 'join') text = `${plainNick} присоединился(-ась)`;
                 else if (obj.subtype === 'leave') text = `${plainNick} покинул(а) чат`;
-                else if (obj.subtype === 'pin') text = `📌 ${plainNick} закрепил(а) сообщение`;
-                else if (obj.subtype === 'unpin') text = `📌 ${plainNick} открепил(а) сообщение`;
+                else if (obj.subtype === 'pin') text = `${plainNick} закрепил(а) сообщение`;
+                else if (obj.subtype === 'unpin') text = `${plainNick} открепил(а) сообщение`;
                 if (text) return { id: 'hist-sys-' + i, type: 'system', text, ts: obj.ts };
               } catch { return null; }
             }
@@ -204,8 +287,8 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         try {
           const plainNick = await decryptNick(cryptoKey, byNick);
           const text = action === 'pin'
-            ? `📌 ${plainNick} закрепил(а) сообщение`
-            : `📌 ${plainNick} открепил(а) сообщение`;
+            ? `${plainNick} закрепил(а) сообщение`
+            : `${plainNick} открепил(а) сообщение`;
           setMessages(prev => [
             ...prev,
             { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text, ts: Date.now() },
@@ -218,6 +301,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       try {
         const plainNick = await decryptNick(cryptoKey, encNick);
         if (plainNick === nickname) return;
+        recordActivityEvent();
         setMessages(prev => [
           ...prev,
           { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text: `${plainNick} присоединился(-ась)`, ts: Date.now() },
@@ -228,6 +312,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     socket.on('user_left', async ({ nick: encNick }) => {
       try {
         const plainNick = await decryptNick(cryptoKey, encNick);
+        recordActivityEvent();
         setMessages(prev => [
           ...prev,
           { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text: `${plainNick} покинул(а) чат`, ts: Date.now() },
@@ -239,7 +324,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       clearInterval(pingIntervalRef.current);
       socket.disconnect();
     };
-  }, [roomId, cryptoKey, nickname, loadHistory]);
+  }, [roomId, cryptoKey, nickname, loadHistory, recordActivityEvent]);
 
   const handleSend = useCallback(async (text) => {
     if (!text.trim() || !socketRef.current?.connected) return;
@@ -370,8 +455,12 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           <div className="header-logo">EM</div>
           <div className="header-chat-info">
             <div className="header-chat-name-row">
-              <span className="header-chat-name">{chatName || 'Чат'}</span>
-              <span className="header-seed-badge">#{seedShort}</span>
+              <span className="header-chat-name">Секретный чат</span>
+              {suspiciousActivity && (
+                <span className="header-warning-badge" title="Подозрительная активность: необычное число входов/выходов">
+                  <IconWarning /> Подозрительная активность
+                </span>
+              )}
             </div>
             <div className="header-meta-row">
               <span className={`header-status-dot ${status === 'online' ? 'dot-online' : status === 'offline' ? 'dot-offline' : 'dot-connecting'}`} />
@@ -385,7 +474,9 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
                 </>
               )}
               <span className="header-meta-sep">·</span>
-              <span className="header-enc-badge">🔒 AES-256</span>
+              <span className="header-enc-badge">
+                <IconLock /> AES-256
+              </span>
             </div>
           </div>
         </div>
@@ -393,17 +484,33 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         {/* Right: online count, media, nick, actions */}
         <div className="header-right">
           <div className="online-badge">
-            <span className="online-dot" />
+            <IconUsers />
             <span>{onlineCount}</span>
           </div>
           <button
             className={'header-btn' + (showMediaPanel ? ' active' : '')}
             onClick={() => setShowMediaPanel(v => !v)}
             title="Медиафайлы чата"
-          >📂</button>
-          <div className="nick-badge">👤 {nickname}</div>
-          <button className="leave-btn" onClick={onLeaveRoom} title="Сменить чат">← Чаты</button>
-          <button className="logout-btn" onClick={onLogout}>Выйти</button>
+          >
+            <IconMedia />
+          </button>
+          <div className="nick-badge">
+            <div
+              className="nick-avatar-sm"
+              style={{ background: ownNickColor }}
+              title={nickname}
+            >
+              {nickname ? nickname[0].toUpperCase() : '?'}
+            </div>
+            <span>{nickname}</span>
+          </div>
+          <button className="leave-btn" onClick={onLeaveRoom} title="Сменить чат">
+            <IconChevronLeft />
+            <span>Чаты</span>
+          </button>
+          <button className="logout-btn" onClick={onLogout} title="Выйти">
+            <IconLogout />
+          </button>
         </div>
       </header>
 
@@ -463,7 +570,9 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
 
       {/* ── Scroll-to-bottom button ── */}
       {showScrollBtn && (
-        <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="В конец">↓</button>
+        <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="В конец">
+          <IconArrowDown />
+        </button>
       )}
 
       {/* ── Typing indicator ── */}

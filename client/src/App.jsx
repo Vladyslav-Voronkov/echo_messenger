@@ -53,12 +53,7 @@ export default function App() {
         deriveRoomId(seedPhrase),
         deriveKey(seedPhrase),
       ]);
-      // chatName: first 3 words of seed (or full if short), used as display name in header
-      const words = seedPhrase.trim().split(/\s+/);
-      const chatName = words.slice(0, 3).join(' ');
-      // seedShort: first 6 hex chars of roomId for quick identification
-      const seedShort = roomId.slice(0, 6).toUpperCase();
-      setSession({ nickname: account.nickname, roomId, cryptoKey, chatName, seedShort });
+      setSession({ nickname: account.nickname, roomId, cryptoKey });
       setPhase('chat');
     } catch (err) {
       console.error(err);
