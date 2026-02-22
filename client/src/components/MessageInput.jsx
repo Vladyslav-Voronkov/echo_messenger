@@ -46,12 +46,18 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
     ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
   }, [text]);
 
-  // Close attach menu when clicking outside
+  // Close attach menu when clicking outside (use mousedown so it doesn't
+  // fire before the menu item's onClick has a chance to execute)
+  const attachMenuRef = useRef(null);
   useEffect(() => {
     if (!showAttachMenu) return;
-    const close = () => setShowAttachMenu(false);
-    document.addEventListener('click', close, { capture: true, once: true });
-    return () => document.removeEventListener('click', close, { capture: true });
+    const close = (e) => {
+      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target)) {
+        setShowAttachMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
   }, [showAttachMenu]);
 
   // Notify parent that user started/stopped typing (debounced)
@@ -444,11 +450,11 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
         {!isRecording && (
           <div className="input-left-actions">
             {/* Attach popup */}
-            <div className="attach-menu-wrap">
+            <div className="attach-menu-wrap" ref={attachMenuRef}>
               <button
                 type="button"
                 className={'input-icon-btn' + (showAttachMenu ? ' active' : '')}
-                onClick={(e) => { e.stopPropagation(); setShowAttachMenu(v => !v); }}
+                onClick={() => setShowAttachMenu(v => !v)}
                 disabled={disabled || imgLoading}
                 title="Вложения"
               >
@@ -459,7 +465,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
               </button>
 
               {showAttachMenu && (
-                <div className="attach-menu" onClick={e => e.stopPropagation()}>
+                <div className="attach-menu">
                   <button className="attach-menu-item" onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                     Фото / видео
