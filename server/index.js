@@ -25,8 +25,10 @@ const app = express();
 
 app.use(cors({
   origin: (origin, cb) => cb(null, true),
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-file-meta'],
 }));
+app.options('*', cors()); // Handle preflight requests (needed for iOS URLSession)
 
 app.use(express.json({ limit: '64kb' }));
 
