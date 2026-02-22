@@ -133,3 +133,31 @@ export async function decryptImageToDataUrl(key, ivB64, dataB64, mimeType) {
   );
   return 'data:' + mimeType + ';base64,' + bufToB64(plainBuf);
 }
+
+/**
+ * Encrypt a file ArrayBuffer → { iv (base64 string), blob (Blob of raw ciphertext) }
+ * The ciphertext is sent as binary (no base64 conversion) — much more memory-efficient.
+ */
+export async function encryptFileToBinary(key, arrayBuffer) {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const cipherBuf = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, tagLength: TAG_BITS },
+    key,
+    arrayBuffer,
+  );
+  return {
+    iv: bufToB64(iv),
+    blob: new Blob([cipherBuf], { type: 'application/octet-stream' }),
+  };
+}
+
+/**
+ * Decrypt a binary ciphertext ArrayBuffer (downloaded from /files/...) back to ArrayBuffer.
+ */
+export async function decryptFileFromBinary(key, ivB64, cipherBuffer) {
+  return crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: b64ToBuf(ivB64), tagLength: TAG_BITS },
+    key,
+    cipherBuffer,
+  );
+}

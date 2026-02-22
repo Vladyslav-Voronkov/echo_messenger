@@ -10,6 +10,8 @@ export default defineConfig({
       // In dev: proxy API and WebSocket to the local Node server
       '/history': { target: 'http://localhost:3001', changeOrigin: true },
       '/auth':    { target: 'http://localhost:3001', changeOrigin: true },
+      '/upload':  { target: 'http://localhost:3001', changeOrigin: true },
+      '/files':   { target: 'http://localhost:3001', changeOrigin: true },
       '/socket.io': {
         target: 'http://localhost:3001',
         changeOrigin: true,

@@ -18,7 +18,7 @@ function parseMessage(raw) {
   return { type: 'text', text: raw, replyTo: null };
 }
 
-export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted }) {
+export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId }) {
   const [hovered, setHovered] = useState(false);
   const { nick, ts, isOwn } = message;
   const parsed = parseMessage(message.text);
@@ -83,7 +83,7 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
         {parsed.type === 'image' ? (
           <ImageMessage imageData={parsed.imageData} cryptoKey={cryptoKey} />
         ) : parsed.type === 'file' ? (
-          <FileMessage fileData={parsed.fileData} cryptoKey={cryptoKey} />
+          <FileMessage fileData={parsed.fileData} cryptoKey={cryptoKey} roomId={roomId} />
         ) : (
           <p className="message-text">{displayText}</p>
         )}

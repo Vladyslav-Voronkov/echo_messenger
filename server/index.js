@@ -3,8 +3,11 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import fs from 'fs/promises';
+import { createWriteStream, createReadStream } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomBytes } from 'crypto';
+import multer from 'multer';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -13,8 +16,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..');
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
+const FILES_DIR = path.join(DATA_DIR, 'files');
 
 await fs.mkdir(CHATS_DIR, { recursive: true });
+await fs.mkdir(FILES_DIR, { recursive: true });
 
 const app = express();
 
@@ -39,6 +44,10 @@ function isValidHash(h) {
   return typeof h === 'string' && /^[a-f0-9]{64}$/.test(h);
 }
 
+function isValidFileId(id) {
+  return typeof id === 'string' && /^[a-f0-9]{32}$/.test(id);
+}
+
 // ── Accounts storage ─────────────────────────────────────────────────────────
 
 async function loadAccounts() {
@@ -59,7 +68,6 @@ async function saveAccounts(accounts) {
 // ── Auth routes ──────────────────────────────────────────────────────────────
 
 // POST /auth/register
-// Body: { nickname, passwordHash }  — passwordHash = sha256(sha256(password))
 app.post('/auth/register', async (req, res) => {
   const { nickname, passwordHash } = req.body || {};
 
@@ -94,7 +102,6 @@ app.post('/auth/register', async (req, res) => {
 });
 
 // POST /auth/login
-// Body: { nickname, passwordHash }
 app.post('/auth/login', async (req, res) => {
   const { nickname, passwordHash } = req.body || {};
 
@@ -141,16 +148,113 @@ app.get('/history/:roomId', async (req, res) => {
   }
 });
 
+// ── File upload / download routes ────────────────────────────────────────────
+
+// multer: stream directly to disk, no size limit enforced here (1GB checked below)
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, FILES_DIR),
+  filename: (_req, _file, cb) => cb(null, randomBytes(16).toString('hex') + '.enc'),
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 1.1 * 1024 * 1024 * 1024 }, // 1.1 GB hard limit
+});
+
+// POST /upload/:roomId
+// Multipart: field "file" = encrypted binary blob
+// Headers: x-file-meta = JSON { iv, nick, name, mime, size, ts }
+app.post('/upload/:roomId', upload.single('file'), async (req, res) => {
+  const { roomId } = req.params;
+  if (!isValidRoomId(roomId)) {
+    if (req.file) await fs.unlink(req.file.path).catch(() => {});
+    return res.status(400).json({ error: 'Invalid room ID' });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file' });
+  }
+
+  let meta;
+  try {
+    meta = JSON.parse(req.headers['x-file-meta'] || '{}');
+  } catch {
+    await fs.unlink(req.file.path).catch(() => {});
+    return res.status(400).json({ error: 'Invalid meta' });
+  }
+
+  const { iv, nick, name, mime, size, ts } = meta;
+  if (
+    typeof iv !== 'string' || !iv ||
+    typeof nick !== 'string' || !nick ||
+    typeof name !== 'string' || !name
+  ) {
+    await fs.unlink(req.file.path).catch(() => {});
+    return res.status(400).json({ error: 'Missing meta fields' });
+  }
+
+  const fileId = path.basename(req.file.filename, '.enc');
+
+  // Store mapping: fileId.meta.json → { iv, nick, name, mime, size, ts, roomId }
+  const metaPath = path.join(FILES_DIR, fileId + '.meta.json');
+  await fs.writeFile(metaPath, JSON.stringify({ iv, nick, name, mime, size, ts, roomId }), 'utf8');
+
+  return res.json({ ok: true, fileId });
+});
+
+// GET /files/:roomId/:fileId — stream encrypted file back
+app.get('/files/:roomId/:fileId', async (req, res) => {
+  const { roomId, fileId } = req.params;
+  if (!isValidRoomId(roomId) || !isValidFileId(fileId)) {
+    return res.status(400).end();
+  }
+
+  const metaPath = path.join(FILES_DIR, fileId + '.meta.json');
+  let meta;
+  try {
+    meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+  } catch {
+    return res.status(404).end();
+  }
+
+  // Only allow access from the correct room
+  if (meta.roomId !== roomId) return res.status(403).end();
+
+  const filePath = path.join(FILES_DIR, fileId + '.enc');
+  try {
+    const stat = await fs.stat(filePath);
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    createReadStream(filePath).pipe(res);
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// GET /files/:roomId/:fileId/meta — return metadata
+app.get('/files/:roomId/:fileId/meta', async (req, res) => {
+  const { roomId, fileId } = req.params;
+  if (!isValidRoomId(roomId) || !isValidFileId(fileId)) {
+    return res.status(400).end();
+  }
+
+  const metaPath = path.join(FILES_DIR, fileId + '.meta.json');
+  try {
+    const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    if (meta.roomId !== roomId) return res.status(403).end();
+    return res.json(meta);
+  } catch {
+    return res.status(404).end();
+  }
+});
+
 // ── Static client (production) ───────────────────────────────────────────────
-// Serve the built React app. In development this folder won't exist, which is fine.
 const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
 
 app.use(express.static(CLIENT_DIST));
 
-// SPA fallback — any unmatched route returns index.html so React Router works
+// SPA fallback — any unmatched route returns index.html
 app.get('*', (_req, res) => {
   res.sendFile(path.join(CLIENT_DIST, 'index.html'), (err) => {
-    // In dev the dist folder doesn't exist — just return 404 silently
     if (err) res.status(404).end();
   });
 });
@@ -165,6 +269,7 @@ const io = new Server(httpServer, {
     methods: ['GET', 'POST'],
   },
   transports: ['websocket', 'polling'],
+  maxHttpBufferSize: 1e6, // 1MB — socket messages are text only now
 });
 
 // Map<roomId, Set<socketId>>
@@ -245,4 +350,5 @@ httpServer.listen(PORT, () => {
   console.log(`SecureChat server running on port ${PORT}`);
   console.log(`Chats directory: ${CHATS_DIR}`);
   console.log(`Accounts file: ${ACCOUNTS_FILE}`);
+  console.log(`Files directory: ${FILES_DIR}`);
 });

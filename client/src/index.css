@@ -1266,6 +1266,51 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
+/*  UPLOAD PROGRESS BAR (file send)                                            */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.upload-progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--bg-glass-deep);
+  border-top: 1px solid var(--border);
+}
+
+.upload-progress-track {
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.upload-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #7c3aed);
+  border-radius: 2px;
+  transition: width 0.2s ease;
+}
+
+.upload-progress-label {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  min-width: 100px;
+  text-align: right;
+}
+
+/* Download progress inside file bubble */
+.file-dl-progress {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
 /*  MESSAGE HIGHLIGHT (scroll-to reply)                                        */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 

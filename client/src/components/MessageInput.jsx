@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import EmojiPicker from './EmojiPicker.jsx';
 import PdfTools from './PdfTools.jsx';
-import { encryptImageBuffer, encryptNick, encryptMessage } from '../utils/crypto.js';
+import { encryptImageBuffer, encryptNick, encryptMessage, encryptFileToBinary } from '../utils/crypto.js';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024;
@@ -12,6 +12,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
   const [showEmoji, setShowEmoji] = useState(false);
   const [showPdfTools, setShowPdfTools] = useState(false);
   const [imgLoading, setImgLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null); // null | { pct: 0-100, label: string }
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -110,26 +111,69 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
     if (file.size > MAX_FILE_SIZE) { alert('Максимальный размер файла: 1GB'); return; }
 
     setImgLoading(true);
+    setUploadProgress({ pct: 0, label: 'Чтение файла...' });
     try {
+      // 1. Read file into memory
       const arrayBuffer = await file.arrayBuffer();
-      const encFile = await encryptImageBuffer(cryptoKey, arrayBuffer, file.type || 'application/octet-stream');
+
+      // 2. Encrypt to binary blob (no base64 — stays binary, 1.33x less memory)
+      setUploadProgress({ pct: 5, label: 'Шифрование...' });
+      const { iv, blob: encBlob } = await encryptFileToBinary(cryptoKey, arrayBuffer);
       const encNick = await encryptNick(cryptoKey, nickname);
-      const fileInfo = {
-        iv: encFile.iv,
-        data: encFile.data,
-        mime: encFile.mime,
+
+      // 3. Upload via XHR so we get progress events
+      setUploadProgress({ pct: 10, label: 'Загрузка 0%...' });
+      const formData = new FormData();
+      formData.append('file', encBlob, 'encrypted.bin');
+
+      const meta = JSON.stringify({
+        iv,
+        nick: encNick,
         name: file.name,
+        mime: file.type || 'application/octet-stream',
         size: file.size,
-      };
-      const payload = JSON.stringify({ type: 'file', file: fileInfo });
-      const { iv, data } = await encryptMessage(cryptoKey, payload);
+        ts: Date.now(),
+      });
+
+      const fileId = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/upload/' + roomId);
+        xhr.setRequestHeader('x-file-meta', meta);
+        xhr.upload.onprogress = (ev) => {
+          if (ev.lengthComputable) {
+            const pct = Math.round(10 + (ev.loaded / ev.total) * 88);
+            setUploadProgress({ pct, label: 'Загрузка ' + Math.round((ev.loaded / ev.total) * 100) + '%...' });
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            try { resolve(JSON.parse(xhr.responseText).fileId); }
+            catch { reject(new Error('Bad server response')); }
+          } else {
+            reject(new Error('Upload failed: ' + xhr.status));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(formData);
+      });
+
+      // 4. Send a small socket message referencing the uploaded file
+      setUploadProgress({ pct: 99, label: 'Отправка...' });
+      const payload = JSON.stringify({
+        type: 'file',
+        file: { fileId, name: file.name, mime: file.type || 'application/octet-stream', size: file.size },
+      });
+      const { iv: msgIv, data: msgData } = await encryptMessage(cryptoKey, payload);
       socketRef.current.emit('message', {
         roomId,
-        encrypted: { iv, data, ts: Date.now(), nick: encNick },
+        encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick },
       });
+      setUploadProgress({ pct: 100, label: 'Готово!' });
+      setTimeout(() => setUploadProgress(null), 800);
     } catch (err) {
       console.error('File send error:', err);
-      alert('Ошибка отправки файла');
+      setUploadProgress(null);
+      alert('Ошибка отправки файла: ' + err.message);
     } finally {
       setImgLoading(false);
     }
@@ -246,6 +290,15 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
           nickname={nickname}
           onClose={() => setShowPdfTools(false)}
         />
+      )}
+
+      {uploadProgress !== null && (
+        <div className="upload-progress-bar">
+          <div className="upload-progress-track">
+            <div className="upload-progress-fill" style={{ width: uploadProgress.pct + '%' }} />
+          </div>
+          <span className="upload-progress-label">{uploadProgress.label}</span>
+        </div>
       )}
 
       <p className="input-hint">Enter — отправить · Shift+Enter — перенос · Esc — закрыть</p>
