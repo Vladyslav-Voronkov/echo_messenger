@@ -1,3 +1,4 @@
+// v2026-02-22
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';

@@ -1,3 +1,4 @@
+// build: 2026-02-22T00:00:00Z
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
