@@ -22,7 +22,7 @@ function parseMessage(raw) {
   return { type: 'text', text: raw, replyTo: null };
 }
 
-export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike }) {
+export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike, pins, onPin }) {
   const [hovered, setHovered] = useState(false);
   const { nick, ts, isOwn } = message;
   const parsed = parseMessage(message.text);
@@ -34,6 +34,9 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
   // likes is already an array of plaintext nicks (no decryption needed)
   const likeNicks = likes || [];
 
+  // Is this message pinned?
+  const isPinned = pins && pins.some(p => p.ts === ts);
+
   const time = new Date(ts).toLocaleTimeString('ru-RU', {
     hour: '2-digit', minute: '2-digit',
   });
@@ -42,8 +45,6 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
   const replyTo = parsed.replyTo || null;
 
   const rowCls = 'message-row ' + (isOwn ? 'own' : 'other') + (highlighted ? ' highlighted' : '');
-  const replyLCls = 'reply-btn reply-btn-left' + (hovered ? ' visible' : '');
-  const replyRCls = 'reply-btn reply-btn-right' + (hovered ? ' visible' : '');
 
   const handleReplyClick = () => {
     const replyText = parsed.type === 'image'
@@ -70,11 +71,16 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
       onMouseLeave={() => setHovered(false)}
     >
       {!isOwn && (
-        <button
-          className={replyLCls}
-          onClick={handleReplyClick}
-          title="Ответить"
-        >↩</button>
+        <div className={'msg-actions msg-actions-left' + (hovered ? ' visible' : '')}>
+          <button className="action-btn" onClick={handleReplyClick} title="Ответить">↩</button>
+          {onPin && (
+            <button
+              className={'action-btn pin-btn' + (isPinned ? ' pinned' : '')}
+              onClick={() => onPin(message)}
+              title={isPinned ? 'Открепить' : 'Закрепить'}
+            >📌</button>
+          )}
+        </div>
       )}
 
       <div className="message-bubble" onDoubleClick={() => onLike(message)}>
@@ -114,11 +120,16 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
       </div>
 
       {isOwn && (
-        <button
-          className={replyRCls}
-          onClick={handleReplyClick}
-          title="Ответить"
-        >↩</button>
+        <div className={'msg-actions msg-actions-right' + (hovered ? ' visible' : '')}>
+          {onPin && (
+            <button
+              className={'action-btn pin-btn' + (isPinned ? ' pinned' : '')}
+              onClick={() => onPin(message)}
+              title={isPinned ? 'Открепить' : 'Закрепить'}
+            >📌</button>
+          )}
+          <button className="action-btn" onClick={handleReplyClick} title="Ответить">↩</button>
+        </div>
       )}
       {likes && likes.length > 0 && (
         <div className={'like-badge' + (isOwn ? ' like-badge-own' : '')} onClick={() => onLike(message)}>

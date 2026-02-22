@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import Message from './Message.jsx';
 import MessageInput from './MessageInput.jsx';
+import PinnedBanner from './PinnedBanner.jsx';
+import MediaPanel from './MediaPanel.jsx';
 import { encryptMessage, encryptNick, decryptNick, decryptMessageObject } from '../utils/crypto.js';
 
 // In dev: Vite proxies /socket.io → localhost:3001 automatically.
@@ -23,7 +25,12 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const [readReceipts, setReadReceipts] = useState({});
   // { encryptedNick: upToTs } — tracks who read up to which timestamp
   const [likes, setLikes] = useState({});
-  // { msgTs: [encNick, ...] } — who liked each message
+  // { msgTs: [nick, ...] } — who liked each message
+  const [pins, setPins] = useState([]);
+  // [{ ts, pinnedAt }, ...] — sorted by ts ascending
+  const [activePinIdx, setActivePinIdx] = useState(0);
+  const [showMediaPanel, setShowMediaPanel] = useState(false);
+
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const messagesAreaRef = useRef(null);
@@ -68,6 +75,11 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       sendReadRef.current(); // mark newly received messages as read
     }
   }, [messages]);
+
+  // Reset activePinIdx when pins change and it's out of bounds
+  useEffect(() => {
+    setActivePinIdx(prev => (pins.length === 0 ? 0 : Math.min(prev, pins.length - 1)));
+  }, [pins]);
 
   const loadHistory = useCallback(async () => {
     if (loadedRef.current) return;
@@ -155,6 +167,10 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       setLikes(prev => ({ ...prev, [msgTs]: nicks }));
     });
 
+    socket.on('pins_updated', ({ pins: updatedPins }) => {
+      if (Array.isArray(updatedPins)) setPins(updatedPins);
+    });
+
     return () => socket.disconnect();
   }, [roomId, cryptoKey, nickname, loadHistory]);
 
@@ -182,10 +198,12 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
 
   const handleScrollToMessage = useCallback((msgId) => {
     const el = document.querySelector('[data-msg-id="' + msgId + '"]');
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setHighlightId(msgId);
-    setTimeout(() => setHighlightId(null), 1500);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightId(msgId);
+      setTimeout(() => setHighlightId(null), 1500);
+      setShowMediaPanel(false); // close panel after navigating
+    }
   }, []);
 
   // Load older messages when near top; show/hide scroll-to-bottom button
@@ -217,6 +235,26 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       roomId, msgTs: msg.ts, nick: nickname,
     });
   }, [nickname, roomId]);
+
+  // Toggle pin/unpin on a message
+  const handlePin = useCallback((msg) => {
+    if (!socketRef.current?.connected) return;
+    const already = pins.some(p => p.ts === msg.ts);
+    socketRef.current.emit(already ? 'unpin' : 'pin', { roomId, msgTs: msg.ts });
+  }, [pins, roomId]);
+
+  // Navigate pinned messages (delta = +1 or -1)
+  const handleChangePin = useCallback((delta) => {
+    setPins(currentPins => {
+      setActivePinIdx(prev => {
+        const next = prev + delta;
+        if (next < 0) return currentPins.length - 1;
+        if (next >= currentPins.length) return 0;
+        return next;
+      });
+      return currentPins;
+    });
+  }, []);
 
   // Always keep sendReadRef.current pointing to the latest closure
   sendReadRef.current = async () => {
@@ -273,11 +311,27 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
             <span className="online-dot" />
             <span>{onlineCount}</span>
           </div>
+          <button
+            className={'header-btn' + (showMediaPanel ? ' active' : '')}
+            onClick={() => setShowMediaPanel(v => !v)}
+            title="Медиафайлы переписки"
+          >📂</button>
           <div className="nick-badge">👤 {nickname}</div>
           <button className="leave-btn" onClick={onLeaveRoom}>← Комнаты</button>
           <button className="logout-btn" onClick={onLogout}>Выйти</button>
         </div>
       </header>
+
+      {/* ── Pinned messages banner ── */}
+      {pins.length > 0 && (
+        <PinnedBanner
+          pins={pins}
+          messages={messages}
+          activePinIdx={activePinIdx}
+          onChangePin={handleChangePin}
+          onScrollToPin={handleScrollToMessage}
+        />
+      )}
 
       <main className="messages-area" ref={messagesAreaRef} onScroll={handleScroll}>
         {messages.length === 0 && status === 'online' && (
@@ -304,10 +358,23 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
             readReceipts={readReceipts}
             likes={likes[msg.ts] || []}
             onLike={handleLike}
+            pins={pins}
+            onPin={handlePin}
           />
         ))}
         <div ref={messagesEndRef} />
       </main>
+
+      {/* ── Media panel (sliding drawer) ── */}
+      {showMediaPanel && (
+        <MediaPanel
+          messages={messages}
+          cryptoKey={cryptoKey}
+          roomId={roomId}
+          onClose={() => setShowMediaPanel(false)}
+          onScrollToMessage={handleScrollToMessage}
+        />
+      )}
 
       {/* ── Scroll-to-bottom button ── */}
       {showScrollBtn && (

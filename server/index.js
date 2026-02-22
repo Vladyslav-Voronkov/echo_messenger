@@ -17,6 +17,7 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..');
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 const LIKES_FILE = path.join(DATA_DIR, 'likes.json');
+const PINS_FILE = path.join(DATA_DIR, 'pins.json');
 const FILES_DIR = path.join(DATA_DIR, 'files');
 
 await fs.mkdir(CHATS_DIR, { recursive: true });
@@ -79,8 +80,12 @@ const readReceipts = new Map();
 // Map<roomId, Map<msgTs_string, Set<plainNick>>> — message likes (persisted to likes.json)
 const messageLikes = new Map();
 
-// Load persisted likes into messageLikes Map
+// Map<roomId, Map<msgTs_string, { ts, pinnedAt }>> — pinned messages (persisted to pins.json)
+const roomPins = new Map();
+
+// Load persisted likes and pins into Maps
 await loadLikes();
+await loadPins();
 
 // ── Likes storage ────────────────────────────────────────────────────────
 
@@ -108,6 +113,36 @@ async function saveLikes() {
   const tmp = LIKES_FILE + '.tmp';
   await fs.writeFile(tmp, JSON.stringify(data), 'utf8');
   await fs.rename(tmp, LIKES_FILE);
+}
+
+// ── Pins storage ──────────────────────────────────────────────────────────
+
+async function loadPins() {
+  try {
+    const raw = await fs.readFile(PINS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    for (const [roomId, pins] of Object.entries(data)) {
+      roomPins.set(roomId, new Map());
+      for (const [msgTs, pinObj] of Object.entries(pins)) {
+        roomPins.get(roomId).set(msgTs, pinObj);
+      }
+    }
+  } catch { /* file doesn't exist yet — start fresh */ }
+}
+
+async function savePins() {
+  const data = {};
+  for (const [roomId, pins] of roomPins) {
+    if (pins.size > 0) {
+      data[roomId] = {};
+      for (const [msgTs, pinObj] of pins) {
+        data[roomId][msgTs] = pinObj;
+      }
+    }
+  }
+  const tmp = PINS_FILE + '.tmp';
+  await fs.writeFile(tmp, JSON.stringify(data), 'utf8');
+  await fs.rename(tmp, PINS_FILE);
 }
 
 // ── Auth routes ──────────────────────────────────────────────────────────────
@@ -334,6 +369,9 @@ io.on('connection', (socket) => {
     if (!roomMembers.has(roomId)) roomMembers.set(roomId, new Set());
     roomMembers.get(roomId).add(socket.id);
     io.to(roomId).emit('online_count', { count: getRoomCount(roomId) });
+    // Send current pins to newly joined socket
+    const pins = [...(roomPins.get(roomId)?.values() ?? [])].sort((a, b) => a.ts - b.ts);
+    if (pins.length > 0) socket.emit('pins_updated', { pins });
   });
 
   socket.on('message', async ({ roomId, encrypted }) => {
@@ -405,6 +443,23 @@ io.on('connection', (socket) => {
     roomLikes.get(key)?.delete(nick.trim());
     io.to(roomId).emit('liked', { msgTs, nicks: [...(roomLikes.get(key) ?? [])] });
     saveLikes().catch(() => {});
+  });
+
+  socket.on('pin', ({ roomId, msgTs }) => {
+    if (!isValidRoomId(roomId) || typeof msgTs !== 'number') return;
+    if (!roomPins.has(roomId)) roomPins.set(roomId, new Map());
+    roomPins.get(roomId).set(String(msgTs), { ts: msgTs, pinnedAt: Date.now() });
+    const pins = [...roomPins.get(roomId).values()].sort((a, b) => a.ts - b.ts);
+    io.to(roomId).emit('pins_updated', { pins });
+    savePins().catch(() => {});
+  });
+
+  socket.on('unpin', ({ roomId, msgTs }) => {
+    if (!isValidRoomId(roomId) || typeof msgTs !== 'number') return;
+    roomPins.get(roomId)?.delete(String(msgTs));
+    const pins = [...(roomPins.get(roomId)?.values() ?? [])].sort((a, b) => a.ts - b.ts);
+    io.to(roomId).emit('pins_updated', { pins });
+    savePins().catch(() => {});
   });
 
   socket.on('disconnect', () => {
