@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import EmojiPicker from './EmojiPicker.jsx';
 import PdfTools from './PdfTools.jsx';
-import { encryptImageBuffer, encryptNick, encryptMessage, encryptFileToBinary } from '../utils/crypto.js';
+import { encryptNick, encryptMessage, encryptFileToBinary } from '../utils/crypto.js';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024;
@@ -86,19 +86,58 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
     if (file.size > MAX_IMAGE_SIZE) { alert('Максимальный размер фото: 5MB'); return; }
 
     setImgLoading(true);
+    setUploadProgress({ pct: 0, label: 'Чтение файла...' });
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const encImage = await encryptImageBuffer(cryptoKey, arrayBuffer, file.type);
+
+      // Encrypt to binary blob (same approach as regular files)
+      setUploadProgress({ pct: 5, label: 'Шифрование...' });
+      const { iv, blob: encBlob } = await encryptFileToBinary(cryptoKey, arrayBuffer);
       const encNick = await encryptNick(cryptoKey, nickname);
-      const payload = JSON.stringify({ type: 'image', image: encImage });
-      const { iv, data } = await encryptMessage(cryptoKey, payload);
+
+      // Upload via XHR with progress
+      setUploadProgress({ pct: 10, label: 'Загрузка 0%...' });
+      const formData = new FormData();
+      formData.append('file', encBlob, 'encrypted.bin');
+      const meta = JSON.stringify({
+        iv, nick: encNick,
+        name: file.name, mime: file.type, size: file.size, ts: Date.now(),
+      });
+
+      const fileId = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/upload/' + roomId);
+        xhr.setRequestHeader('x-file-meta', meta);
+        xhr.upload.onprogress = (ev) => {
+          if (ev.lengthComputable) {
+            const pct = Math.round(10 + (ev.loaded / ev.total) * 88);
+            setUploadProgress({ pct, label: 'Загрузка ' + Math.round((ev.loaded / ev.total) * 100) + '%...' });
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            try { resolve(JSON.parse(xhr.responseText).fileId); }
+            catch { reject(new Error('Bad server response')); }
+          } else reject(new Error('Upload failed: ' + xhr.status));
+        };
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(formData);
+      });
+
+      // Send small socket message referencing the uploaded image
+      setUploadProgress({ pct: 99, label: 'Отправка...' });
+      const payload = JSON.stringify({ type: 'image', image: { fileId, mime: file.type, size: file.size } });
+      const { iv: msgIv, data: msgData } = await encryptMessage(cryptoKey, payload);
       socketRef.current.emit('message', {
         roomId,
-        encrypted: { iv, data, ts: Date.now(), nick: encNick },
+        encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick },
       });
+      setUploadProgress({ pct: 100, label: 'Готово!' });
+      setTimeout(() => setUploadProgress(null), 800);
     } catch (err) {
       console.error('Image send error:', err);
-      alert('Ошибка отправки изображения');
+      setUploadProgress(null);
+      alert('Ошибка отправки изображения: ' + err.message);
     } finally {
       setImgLoading(false);
     }

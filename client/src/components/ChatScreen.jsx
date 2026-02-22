@@ -19,6 +19,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const [replyTo, setReplyTo] = useState(null);
   const [highlightId, setHighlightId] = useState(null);
   const [typingUsers, setTypingUsers] = useState(new Set());
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const messagesAreaRef = useRef(null);
@@ -31,14 +32,20 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     prevLenRef.current = 0;
   }, [roomId]);
 
-  // Auto-scroll to bottom only when a new message arrives (not when loading older ones)
+  // Auto-scroll to bottom only when a new message arrives and user is near the bottom
   useEffect(() => {
     const added = messages.length - prevLenRef.current;
     prevLenRef.current = messages.length;
-    if (added > 0 && visibleCount >= messages.length) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (added > 0) {
+      const area = messagesAreaRef.current;
+      if (area) {
+        const distFromBottom = area.scrollHeight - area.scrollTop - area.clientHeight;
+        if (distFromBottom < 150) {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
     }
-  }, [messages, visibleCount]);
+  }, [messages]);
 
   const loadHistory = useCallback(async () => {
     if (loadedRef.current) return;
@@ -58,6 +65,10 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         })
       );
       setMessages(decrypted.filter(Boolean));
+      // Instantly jump to the bottom after history loads (like Telegram)
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+      });
     } catch (err) { console.error('History load error:', err); }
   }, [roomId, cryptoKey, nickname]);
 
@@ -148,7 +159,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     setTimeout(() => setHighlightId(null), 1500);
   }, []);
 
-  // Load older messages when user scrolls near the top
+  // Load older messages when near top; show/hide scroll-to-bottom button
   const handleScroll = useCallback((e) => {
     const el = e.currentTarget;
     if (el.scrollTop < 80 && visibleCount < messages.length) {
@@ -158,7 +169,13 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         el.scrollTop = el.scrollHeight - prevScrollHeight;
       });
     }
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollBtn(distFromBottom > 200);
   }, [visibleCount, messages.length]);
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
 
   const statusInfo = {
     connecting: { label: 'Подключение...', cls: 'status-connecting' },
@@ -230,6 +247,11 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         ))}
         <div ref={messagesEndRef} />
       </main>
+
+      {/* ── Scroll-to-bottom button ── */}
+      {showScrollBtn && (
+        <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="В конец">↓</button>
+      )}
 
       {/* ── Typing indicator ── */}
       <div className={'typing-indicator' + (typingUsers.size > 0 ? ' typing-indicator--visible' : '')}>

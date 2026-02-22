@@ -81,7 +81,7 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
         )}
 
         {parsed.type === 'image' ? (
-          <ImageMessage imageData={parsed.imageData} cryptoKey={cryptoKey} />
+          <ImageMessage imageData={parsed.imageData} cryptoKey={cryptoKey} roomId={roomId} />
         ) : parsed.type === 'file' ? (
           <FileMessage fileData={parsed.fileData} cryptoKey={cryptoKey} roomId={roomId} />
         ) : (
