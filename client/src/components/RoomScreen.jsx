@@ -29,7 +29,7 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
         <form onSubmit={handleSubmit} className="login-form">
           <div className="field-group">
             <label htmlFor="seedphrase">
-              Ключ канала
+              Ключ чата
               <span className="label-hint"> — ключ доступа и шифрования</span>
             </label>
             <div className="seed-input-wrapper">
@@ -38,7 +38,7 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
                 type={showSeed ? 'text' : 'password'}
                 value={seedPhrase}
                 onChange={e => setSeedPhrase(e.target.value)}
-                placeholder="Введите ключ для входа в канал"
+                placeholder="Введите ключ для входа в чат"
                 disabled={isLoading}
                 autoComplete="off"
                 autoCorrect="off"
@@ -56,7 +56,7 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
               </button>
             </div>
             <p className="field-hint">
-              Любой с тем же ключом может войти в канал. Сервер видит только хэш.
+              Любой с тем же ключом может войти в чат. Сервер видит только хэш.
             </p>
           </div>
 
@@ -72,7 +72,7 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
                 <span className="spinner" /> Генерация ключа...
               </span>
             ) : (
-              'Войти в канал'
+              'Войти в чат'
             )}
           </button>
         </form>

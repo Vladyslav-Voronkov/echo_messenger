@@ -360,22 +360,41 @@ io.on('connection', (socket) => {
   let currentRoom = null;
   let currentNick = null;
 
-  socket.on('join', ({ roomId, nick }) => {
+  socket.on('join', async ({ roomId, nick }) => {
     if (!isValidRoomId(roomId)) {
       socket.emit('error', { message: 'Invalid room ID' });
       return;
     }
     currentRoom = roomId;
-    currentNick = nick || null; // encrypted nick for join/leave notifications
+    currentNick = nick || null;
     socket.join(roomId);
     if (!roomMembers.has(roomId)) roomMembers.set(roomId, new Set());
     roomMembers.get(roomId).add(socket.id);
     io.to(roomId).emit('online_count', { count: getRoomCount(roomId) });
-    // Notify others that someone joined (encrypted nick)
-    if (nick) socket.to(roomId).emit('user_joined', { nick });
+
+    // Notify others that someone joined (encrypted nick) and persist the event
+    if (nick) {
+      const joinEvent = { type: 'system', subtype: 'join', nick, ts: Date.now() };
+      const filePath = path.join(CHATS_DIR, `${roomId}.txt`);
+      await fs.appendFile(filePath, JSON.stringify(joinEvent) + '\n', 'utf8').catch(() => {});
+      socket.to(roomId).emit('user_joined', { nick });
+    }
+
     // Send current pins to newly joined socket
     const pins = [...(roomPins.get(roomId)?.values() ?? [])].sort((a, b) => a.ts - b.ts);
     if (pins.length > 0) socket.emit('pins_updated', { pins });
+
+    // Send all current likes to newly joined socket
+    const roomLikesMap = messageLikes.get(roomId);
+    if (roomLikesMap && roomLikesMap.size > 0) {
+      const likesSnapshot = {};
+      for (const [msgTs, nicks] of roomLikesMap) {
+        if (nicks.size > 0) likesSnapshot[msgTs] = [...nicks];
+      }
+      if (Object.keys(likesSnapshot).length > 0) {
+        socket.emit('likes_snapshot', { likes: likesSnapshot });
+      }
+    }
   });
 
   socket.on('message', async ({ roomId, encrypted }) => {
@@ -449,30 +468,52 @@ io.on('connection', (socket) => {
     saveLikes().catch(() => {});
   });
 
-  socket.on('pin', ({ roomId, msgTs, nick }) => {
+  socket.on('pin', async ({ roomId, msgTs, nick }) => {
     if (!isValidRoomId(roomId) || typeof msgTs !== 'number') return;
     if (!roomPins.has(roomId)) roomPins.set(roomId, new Map());
     roomPins.get(roomId).set(String(msgTs), { ts: msgTs, pinnedAt: Date.now() });
     const pins = [...roomPins.get(roomId).values()].sort((a, b) => a.ts - b.ts);
     io.to(roomId).emit('pins_updated', { pins, action: 'pin', byNick: nick || null });
     savePins().catch(() => {});
+    // Persist pin notification
+    if (nick) {
+      const pinEvent = { type: 'system', subtype: 'pin', nick, msgTs, ts: Date.now() };
+      const filePath = path.join(CHATS_DIR, `${roomId}.txt`);
+      await fs.appendFile(filePath, JSON.stringify(pinEvent) + '\n', 'utf8').catch(() => {});
+    }
   });
 
-  socket.on('unpin', ({ roomId, msgTs, nick }) => {
+  socket.on('unpin', async ({ roomId, msgTs, nick }) => {
     if (!isValidRoomId(roomId) || typeof msgTs !== 'number') return;
     roomPins.get(roomId)?.delete(String(msgTs));
     const pins = [...(roomPins.get(roomId)?.values() ?? [])].sort((a, b) => a.ts - b.ts);
     io.to(roomId).emit('pins_updated', { pins, action: 'unpin', byNick: nick || null });
     savePins().catch(() => {});
+    // Persist unpin notification
+    if (nick) {
+      const unpinEvent = { type: 'system', subtype: 'unpin', nick, msgTs, ts: Date.now() };
+      const filePath = path.join(CHATS_DIR, `${roomId}.txt`);
+      await fs.appendFile(filePath, JSON.stringify(unpinEvent) + '\n', 'utf8').catch(() => {});
+    }
   });
 
-  socket.on('disconnect', () => {
+  // Ping/latency measurement — just acknowledge immediately
+  socket.on('ping_check', (_data, callback) => {
+    if (typeof callback === 'function') callback();
+  });
+
+  socket.on('disconnect', async () => {
     if (currentRoom && roomMembers.has(currentRoom)) {
       roomMembers.get(currentRoom).delete(socket.id);
       const count = getRoomCount(currentRoom);
       io.to(currentRoom).emit('online_count', { count });
-      // Notify others that someone left (encrypted nick)
-      if (currentNick) socket.to(currentRoom).emit('user_left', { nick: currentNick });
+      // Notify others that someone left (encrypted nick) and persist
+      if (currentNick) {
+        socket.to(currentRoom).emit('user_left', { nick: currentNick });
+        const leaveEvent = { type: 'system', subtype: 'leave', nick: currentNick, ts: Date.now() };
+        const filePath = path.join(CHATS_DIR, `${currentRoom}.txt`);
+        await fs.appendFile(filePath, JSON.stringify(leaveEvent) + '\n', 'utf8').catch(() => {});
+      }
       if (count === 0) roomMembers.delete(currentRoom);
     }
   });

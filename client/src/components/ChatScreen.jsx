@@ -13,21 +13,19 @@ const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
 const BATCH = 50; // messages to render per window
 
 export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
-  const { nickname, roomId, cryptoKey } = session;
+  const { nickname, roomId, cryptoKey, chatName, seedShort } = session;
   const [messages, setMessages] = useState([]);
   const [visibleCount, setVisibleCount] = useState(BATCH);
   const [onlineCount, setOnlineCount] = useState(0);
   const [status, setStatus] = useState('connecting');
+  const [ping, setPing] = useState(null); // ms latency
   const [replyTo, setReplyTo] = useState(null);
   const [highlightId, setHighlightId] = useState(null);
   const [typingUsers, setTypingUsers] = useState(new Set());
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [readReceipts, setReadReceipts] = useState({});
-  // { encryptedNick: upToTs } — tracks who read up to which timestamp
   const [likes, setLikes] = useState({});
-  // { msgTs: [nick, ...] } — who liked each message
   const [pins, setPins] = useState([]);
-  // [{ ts, pinnedAt }, ...] — sorted by ts ascending
   const [activePinIdx, setActivePinIdx] = useState(0);
   const [showMediaPanel, setShowMediaPanel] = useState(false);
 
@@ -40,6 +38,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const messagesRef = useRef([]);
   const sendReadRef = useRef(null);
   const likesRef = useRef({});
+  const pingIntervalRef = useRef(null);
 
   // Reset visible window and scroll flag when room changes
   useEffect(() => {
@@ -52,19 +51,16 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   // Scroll to bottom: instant on first load, smooth on new messages if near bottom
-  // Also send read receipt whenever new messages arrive
   useEffect(() => {
     const added = messages.length - prevLenRef.current;
     prevLenRef.current = messages.length;
     if (added > 0) {
       if (!initialScrollDoneRef.current) {
-        // Initial history load — jump instantly to bottom (like Telegram)
         initialScrollDoneRef.current = true;
         messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
-        sendReadRef.current(); // mark all history as read
+        sendReadRef.current();
         return;
       }
-      // Live messages — only auto-scroll if user is already near the bottom
       const area = messagesAreaRef.current;
       if (area) {
         const distFromBottom = area.scrollHeight - area.scrollTop - area.clientHeight;
@@ -72,7 +68,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }
       }
-      sendReadRef.current(); // mark newly received messages as read
+      sendReadRef.current();
     }
   }, [messages]);
 
@@ -92,6 +88,18 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         lines.map(async (line, i) => {
           try {
             const obj = JSON.parse(line);
+            // Handle persisted system events (join/leave/pin)
+            if (obj.type === 'system') {
+              try {
+                const plainNick = await decryptNick(cryptoKey, obj.nick);
+                let text = '';
+                if (obj.subtype === 'join') text = `${plainNick} присоединился(-ась)`;
+                else if (obj.subtype === 'leave') text = `${plainNick} покинул(а) чат`;
+                else if (obj.subtype === 'pin') text = `📌 ${plainNick} закрепил(а) сообщение`;
+                else if (obj.subtype === 'unpin') text = `📌 ${plainNick} открепил(а) сообщение`;
+                if (text) return { id: 'hist-sys-' + i, type: 'system', text, ts: obj.ts };
+              } catch { return null; }
+            }
             const msg = await decryptMessageObject(cryptoKey, obj);
             if (!msg) return null;
             return { ...msg, id: 'hist-' + i, isOwn: msg.nick === nickname };
@@ -99,7 +107,6 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         })
       );
       setMessages(decrypted.filter(Boolean));
-      // Scroll handled by useEffect on messages change (initialScrollDoneRef)
     } catch (err) { console.error('History load error:', err); }
   }, [roomId, cryptoKey, nickname]);
 
@@ -111,24 +118,35 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     });
     socketRef.current = socket;
 
+    // Ping measurement
+    const measurePing = () => {
+      const t0 = Date.now();
+      socket.emit('ping_check', {}, () => {
+        setPing(Date.now() - t0);
+      });
+    };
+
     socket.on('connect', async () => {
       setStatus('online');
-      // Send encrypted nick so server can broadcast join/leave notifications
       const encNick = await encryptNick(cryptoKey, nickname);
       socket.emit('join', { roomId, nick: encNick });
       loadHistory();
+      // Start ping interval
+      setTimeout(measurePing, 500);
+      pingIntervalRef.current = setInterval(measurePing, 10000);
     });
     socket.on('disconnect', () => {
       setStatus('offline');
-      setTypingUsers(new Set()); // clear typing on disconnect
+      setTypingUsers(new Set());
+      setPing(null);
+      clearInterval(pingIntervalRef.current);
     });
-    socket.on('connect_error', () => setStatus('offline'));
+    socket.on('connect_error', () => { setStatus('offline'); setPing(null); });
     socket.on('online_count', ({ count }) => setOnlineCount(count));
 
     socket.on('message', async ({ encrypted }) => {
       const msg = await decryptMessageObject(cryptoKey, encrypted);
       if (!msg) return;
-      // When a message arrives, remove that nick from typing set
       setTypingUsers(prev => {
         const s = new Set(prev);
         s.delete(msg.nick);
@@ -143,9 +161,9 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     socket.on('typing', async ({ nick: encNick }) => {
       try {
         const plainNick = await decryptNick(cryptoKey, encNick);
-        if (plainNick === nickname) return; // ignore own echoes if any
+        if (plainNick === nickname) return;
         setTypingUsers(prev => new Set([...prev, plainNick]));
-      } catch { /* ignore decrypt errors */ }
+      } catch { /* ignore */ }
     });
 
     socket.on('stop_typing', async ({ nick: encNick }) => {
@@ -156,7 +174,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           s.delete(plainNick);
           return s;
         });
-      } catch { /* ignore decrypt errors */ }
+      } catch { /* ignore */ }
     });
 
     socket.on('read_by', ({ nick, upToTs }) => {
@@ -169,9 +187,19 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       setLikes(prev => ({ ...prev, [msgTs]: nicks }));
     });
 
+    // Receive full likes snapshot when joining (restores likes from server)
+    socket.on('likes_snapshot', ({ likes: snapshot }) => {
+      if (snapshot && typeof snapshot === 'object') {
+        const converted = {};
+        for (const [ts, nicks] of Object.entries(snapshot)) {
+          converted[Number(ts)] = nicks;
+        }
+        setLikes(prev => ({ ...converted, ...prev }));
+      }
+    });
+
     socket.on('pins_updated', async ({ pins: updatedPins, action, byNick }) => {
       if (Array.isArray(updatedPins)) setPins(updatedPins);
-      // Show pin/unpin notification
       if (action && byNick) {
         try {
           const plainNick = await decryptNick(cryptoKey, byNick);
@@ -189,12 +217,12 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     socket.on('user_joined', async ({ nick: encNick }) => {
       try {
         const plainNick = await decryptNick(cryptoKey, encNick);
-        if (plainNick === nickname) return; // don't show own join
+        if (plainNick === nickname) return;
         setMessages(prev => [
           ...prev,
           { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text: `${plainNick} присоединился(-ась)`, ts: Date.now() },
         ]);
-      } catch { /* ignore decrypt errors */ }
+      } catch { /* ignore */ }
     });
 
     socket.on('user_left', async ({ nick: encNick }) => {
@@ -204,10 +232,13 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           ...prev,
           { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text: `${plainNick} покинул(а) чат`, ts: Date.now() },
         ]);
-      } catch { /* ignore decrypt errors */ }
+      } catch { /* ignore */ }
     });
 
-    return () => socket.disconnect();
+    return () => {
+      clearInterval(pingIntervalRef.current);
+      socket.disconnect();
+    };
   }, [roomId, cryptoKey, nickname, loadHistory]);
 
   const handleSend = useCallback(async (text) => {
@@ -238,11 +269,10 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setHighlightId(msgId);
       setTimeout(() => setHighlightId(null), 1500);
-      setShowMediaPanel(false); // close panel after navigating
+      setShowMediaPanel(false);
     }
   }, []);
 
-  // Load older messages when near top; show/hide scroll-to-bottom button
   const handleScroll = useCallback((e) => {
     const el = e.currentTarget;
     if (el.scrollTop < 80 && visibleCount < messages.length) {
@@ -260,10 +290,8 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
-  // Keep likesRef in sync for handleLike
   likesRef.current = likes;
 
-  // Toggle like/unlike on a message (plaintext nick — server deduplicates via Set)
   const handleLike = useCallback((msg) => {
     if (!socketRef.current?.connected) return;
     const already = (likesRef.current[msg.ts] || []).includes(nickname);
@@ -272,7 +300,6 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     });
   }, [nickname, roomId]);
 
-  // Toggle pin/unpin on a message (send encrypted nick for notification)
   const handlePin = useCallback(async (msg) => {
     if (!socketRef.current?.connected) return;
     const already = pins.some(p => p.ts === msg.ts);
@@ -284,7 +311,6 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     }
   }, [pins, roomId, cryptoKey, nickname]);
 
-  // Navigate pinned messages (delta = +1 or -1)
   const handleChangePin = useCallback((delta) => {
     setPins(currentPins => {
       setActivePinIdx(prev => {
@@ -297,7 +323,6 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     });
   }, []);
 
-  // Always keep sendReadRef.current pointing to the latest closure
   sendReadRef.current = async () => {
     if (!socketRef.current?.connected || messagesRef.current.length === 0) return;
     try {
@@ -307,18 +332,11 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     } catch { /* ignore */ }
   };
 
-  // Send read receipt when window regains focus
   useEffect(() => {
     const handler = () => sendReadRef.current();
     window.addEventListener('focus', handler);
     return () => window.removeEventListener('focus', handler);
   }, []);
-
-  const statusInfo = {
-    connecting: { label: 'Подключение...', cls: 'status-connecting' },
-    online:     { label: '🔒 Зашифровано', cls: 'status-online' },
-    offline:    { label: 'Переподключение...', cls: 'status-offline' },
-  }[status];
 
   // Build typing label
   const typingArr = [...typingUsers];
@@ -326,6 +344,12 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   if (typingArr.length === 1) typingLabel = typingArr[0] + ' печатает...';
   else if (typingArr.length === 2) typingLabel = typingArr.join(' и ') + ' печатают...';
   else if (typingArr.length > 2) typingLabel = 'Несколько человек печатают...';
+
+  // Ping label
+  const pingLabel = ping === null ? null
+    : ping < 80 ? { text: ping + ' мс', cls: 'ping-good' }
+    : ping < 200 ? { text: ping + ' мс', cls: 'ping-ok' }
+    : { text: ping + ' мс', cls: 'ping-bad' };
 
   return (
     <div className="chat-container">
@@ -335,18 +359,38 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         <div className="chat-preloader">
           <div className="preloader-logo">EM</div>
           <div className="preloader-spinner" />
-          <p className="preloader-text">Подключение к каналу...</p>
+          <p className="preloader-text">Подключение к чату...</p>
         </div>
       )}
 
+      {/* ── Modern Chat Header ── */}
       <header className="chat-header glass">
+        {/* Left: logo + chat info */}
         <div className="header-left">
           <div className="header-logo">EM</div>
-          <div className="header-info">
-            <span className="header-title">ECHO</span>
-            <span className={'header-status ' + statusInfo.cls}>{statusInfo.label}</span>
+          <div className="header-chat-info">
+            <div className="header-chat-name-row">
+              <span className="header-chat-name">{chatName || 'Чат'}</span>
+              <span className="header-seed-badge">#{seedShort}</span>
+            </div>
+            <div className="header-meta-row">
+              <span className={`header-status-dot ${status === 'online' ? 'dot-online' : status === 'offline' ? 'dot-offline' : 'dot-connecting'}`} />
+              <span className="header-status-text">
+                {status === 'online' ? 'Подключено' : status === 'offline' ? 'Переподключение...' : 'Подключение...'}
+              </span>
+              {pingLabel && (
+                <>
+                  <span className="header-meta-sep">·</span>
+                  <span className={`header-ping ${pingLabel.cls}`}>{pingLabel.text}</span>
+                </>
+              )}
+              <span className="header-meta-sep">·</span>
+              <span className="header-enc-badge">🔒 AES-256</span>
+            </div>
           </div>
         </div>
+
+        {/* Right: online count, media, nick, actions */}
         <div className="header-right">
           <div className="online-badge">
             <span className="online-dot" />
@@ -355,10 +399,10 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           <button
             className={'header-btn' + (showMediaPanel ? ' active' : '')}
             onClick={() => setShowMediaPanel(v => !v)}
-            title="Медиафайлы переписки"
+            title="Медиафайлы чата"
           >📂</button>
           <div className="nick-badge">👤 {nickname}</div>
-          <button className="leave-btn" onClick={onLeaveRoom}>← Комнаты</button>
+          <button className="leave-btn" onClick={onLeaveRoom} title="Сменить чат">← Чаты</button>
           <button className="logout-btn" onClick={onLogout}>Выйти</button>
         </div>
       </header>
@@ -378,7 +422,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         {messages.length === 0 && status === 'online' && (
           <div className="empty-state">
             <div className="empty-icon">💬</div>
-            <p className="empty-title">Канал пуст</p>
+            <p className="empty-title">Чат пуст</p>
             <p className="empty-hint">Напишите первое сообщение. Оно будет зашифровано.</p>
           </div>
         )}

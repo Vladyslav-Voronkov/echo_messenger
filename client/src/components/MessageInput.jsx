@@ -403,17 +403,17 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
   const placeholder = disabled ? 'Переподключение...'
     : imgLoading ? 'Шифрование...'
     : replyTo ? 'Ответ на сообщение...'
-    : 'Сообщение от ' + nickname + '...';
+    : 'Написать сообщение...';
 
-  const emojiCls = 'emoji-toggle-btn' + (showEmoji ? ' active' : '');
   const showSendBtn = !!text.trim();
 
   return (
     <div className="input-area">
+      {/* Reply preview strip */}
       {replyTo && (
         <div className="reply-preview">
           <div className="reply-preview-content">
-            <span className="reply-preview-label">↩ Ответ для</span>
+            <span className="reply-preview-label">↩ Ответ</span>
             <span className="reply-preview-nick">{replyTo.nick}</span>
             <span className="reply-preview-text">
               {replyTo.text.length > 60 ? replyTo.text.slice(0, 60) + '...' : replyTo.text}
@@ -434,92 +434,62 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
         </div>
       )}
 
-      <div className="input-wrapper">
-        {/* ── Desktop: all buttons visible ── */}
+      {/* Hidden file inputs */}
+      <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: 'none' }} />
+      <input ref={fileInputRef} type="file" accept="*/*" onChange={handleFileSelect} style={{ display: 'none' }} />
+
+      {/* ── Modern pill input bar ── */}
+      <div className="input-bar">
+        {/* Left action buttons */}
         {!isRecording && (
-          <>
-            <button
-              type="button"
-              className={emojiCls + ' desktop-only'}
-              onClick={() => setShowEmoji(v => !v)}
-              disabled={disabled}
-              title="Эмодзи"
-            >😊</button>
-
-            <button
-              type="button"
-              className="img-upload-btn desktop-only"
-              onClick={() => imageInputRef.current?.click()}
-              disabled={disabled || imgLoading}
-              title="Отправить фото"
-            >
-              {imgLoading ? <span className="spinner" style={{width:'16px',height:'16px'}} /> : '🖼️'}
-            </button>
-
-            <button
-              type="button"
-              className="img-upload-btn desktop-only"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || imgLoading}
-              title="Отправить файл"
-            >📎</button>
-
-            <button
-              type="button"
-              className="img-upload-btn desktop-only"
-              onClick={() => setShowPdfTools(v => !v)}
-              disabled={disabled || imgLoading}
-              title="PDF инструменты (объединить / разбить)"
-            >📄</button>
-
-            {/* ── Mobile: single attach button with popup menu ── */}
-            <div className="attach-menu-wrap mobile-only">
+          <div className="input-left-actions">
+            {/* Attach popup */}
+            <div className="attach-menu-wrap">
               <button
                 type="button"
-                className={'img-upload-btn' + (showAttachMenu ? ' active' : '')}
+                className={'input-icon-btn' + (showAttachMenu ? ' active' : '')}
                 onClick={(e) => { e.stopPropagation(); setShowAttachMenu(v => !v); }}
                 disabled={disabled || imgLoading}
                 title="Вложения"
               >
-                {imgLoading ? <span className="spinner" style={{width:'16px',height:'16px'}} /> : '📎'}
+                {imgLoading
+                  ? <span className="spinner" style={{width:'15px',height:'15px'}} />
+                  : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+                }
               </button>
 
               {showAttachMenu && (
                 <div className="attach-menu" onClick={e => e.stopPropagation()}>
-                  <button className="attach-menu-item" onClick={() => { setShowEmoji(v => !v); setShowAttachMenu(false); }}>
-                    <span>😊</span> Эмодзи
-                  </button>
                   <button className="attach-menu-item" onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }}>
-                    <span>🖼️</span> Фото
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    Фото / видео
                   </button>
                   <button className="attach-menu-item" onClick={() => { fileInputRef.current?.click(); setShowAttachMenu(false); }}>
-                    <span>📁</span> Файл
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+                    Файл
                   </button>
                   <button className="attach-menu-item" onClick={() => { setShowPdfTools(v => !v); setShowAttachMenu(false); }}>
-                    <span>📄</span> PDF инструменты
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    PDF инструменты
                   </button>
                 </div>
               )}
             </div>
-          </>
+
+            {/* Emoji */}
+            <button
+              type="button"
+              className={'input-icon-btn' + (showEmoji ? ' active' : '')}
+              onClick={() => setShowEmoji(v => !v)}
+              disabled={disabled}
+              title="Эмодзи"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+            </button>
+          </div>
         )}
 
-        <input
-          ref={imageInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleImageSelect}
-          style={{ display: 'none' }}
-        />
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="*/*"
-          onChange={handleFileSelect}
-          style={{ display: 'none' }}
-        />
-
+        {/* Text area */}
         <textarea
           ref={textareaRef}
           value={text}
@@ -531,7 +501,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
           className="message-textarea"
         />
 
-        {/* Send or Mic button */}
+        {/* Right: send or mic */}
         {showSendBtn ? (
           <button
             className="send-btn"
@@ -539,7 +509,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
             disabled={disabled || !text.trim() || imgLoading}
             aria-label="Отправить"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
             </svg>
           </button>
@@ -555,7 +525,10 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
             aria-label={isRecording ? 'Остановить запись' : 'Записать голосовое'}
             title={isRecording ? 'Отпустите для отправки' : 'Удерживайте для записи'}
           >
-            {isRecording ? '⏹' : '🎙'}
+            {isRecording
+              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            }
           </button>
         )}
       </div>
@@ -585,8 +558,6 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
           <span className="upload-progress-label">{uploadProgress.label}</span>
         </div>
       )}
-
-      <p className="input-hint">Enter — отправить · Shift+Enter — перенос · Esc — закрыть</p>
     </div>
   );
 }
