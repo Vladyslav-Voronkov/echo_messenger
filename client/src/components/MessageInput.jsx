@@ -7,6 +7,12 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024;
 const TYPING_DEBOUNCE_MS = 1500;
 
+function formatRecTime(secs) {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+
 export default function MessageInput({ onSend, onTyping, disabled, nickname, replyTo, onCancelReply, cryptoKey, roomId, socketRef }) {
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -14,11 +20,20 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [imgLoading, setImgLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null); // null | { pct: 0-100, label: string }
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [cancelRecord, setCancelRecord] = useState(false);
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimerRef = useRef(null);
   const isTypingRef = useRef(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordStartYRef = useRef(null);
+  const recordingTimerRef = useRef(null);
+  const micStreamRef = useRef(null);
+  const recordingTimeRef = useRef(0);
 
   useEffect(() => {
     if (replyTo) textareaRef.current?.focus();
@@ -227,12 +242,171 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
     }
   }, [cryptoKey, nickname, roomId, socketRef]);
 
+  // ── Voice recording ───────────────────────────────────────────────────────
+
+  const stopMicStream = () => {
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach(t => t.stop());
+      micStreamRef.current = null;
+    }
+  };
+
+  const handleMicPointerDown = useCallback(async (e) => {
+    if (disabled || isRecording) return;
+    e.preventDefault();
+    recordStartYRef.current = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    setCancelRecord(false);
+    audioChunksRef.current = [];
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      alert('Нет доступа к микрофону');
+      return;
+    }
+    micStreamRef.current = stream;
+
+    // Pick best supported mime type
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/ogg')
+          ? 'audio/ogg'
+          : '';
+
+    const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    mediaRecorderRef.current = mr;
+
+    mr.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size > 0) audioChunksRef.current.push(ev.data);
+    };
+
+    mr.start(200); // collect chunks every 200ms
+    recordingTimeRef.current = 0;
+    setRecordingTime(0);
+    setIsRecording(true);
+
+    recordingTimerRef.current = setInterval(() => {
+      recordingTimeRef.current += 1;
+      setRecordingTime(recordingTimeRef.current);
+    }, 1000);
+  }, [disabled, isRecording]);
+
+  const handleMicPointerUp = useCallback(async (e) => {
+    if (!isRecording) return;
+    e.preventDefault();
+
+    clearInterval(recordingTimerRef.current);
+    const duration = recordingTimeRef.current;
+    setIsRecording(false);
+    setRecordingTime(0);
+    setCancelRecord(false);
+
+    const currentY = e.clientY ?? e.changedTouches?.[0]?.clientY ?? recordStartYRef.current;
+    const cancelled = currentY < recordStartYRef.current - 60;
+
+    const mr = mediaRecorderRef.current;
+    if (!mr || mr.state === 'inactive') { stopMicStream(); return; }
+
+    if (cancelled) {
+      mr.stop();
+      stopMicStream();
+      audioChunksRef.current = [];
+      return;
+    }
+
+    // Normal stop → send voice message
+    mr.onstop = async () => {
+      stopMicStream();
+      const chunks = audioChunksRef.current;
+      audioChunksRef.current = [];
+      if (chunks.length === 0) return;
+
+      const mimeType = mr.mimeType || 'audio/webm';
+      const audioBlob = new Blob(chunks, { type: mimeType });
+
+      setImgLoading(true);
+      setUploadProgress({ pct: 0, label: 'Шифрование аудио...' });
+      try {
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        const { iv, blob: encBlob } = await encryptFileToBinary(cryptoKey, arrayBuffer);
+        const encNick = await encryptNick(cryptoKey, nickname);
+
+        setUploadProgress({ pct: 10, label: 'Загрузка...' });
+        const formData = new FormData();
+        formData.append('file', encBlob, 'voice.bin');
+        const meta = JSON.stringify({
+          iv, nick: encNick,
+          name: 'voice.webm', mime: mimeType, size: audioBlob.size, ts: Date.now(),
+        });
+
+        const fileId = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', '/upload/' + roomId);
+          xhr.setRequestHeader('x-file-meta', meta);
+          xhr.upload.onprogress = (ev) => {
+            if (ev.lengthComputable) {
+              const pct = Math.round(10 + (ev.loaded / ev.total) * 88);
+              setUploadProgress({ pct, label: 'Загрузка ' + Math.round((ev.loaded / ev.total) * 100) + '%...' });
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status === 200) {
+              try { resolve(JSON.parse(xhr.responseText).fileId); }
+              catch { reject(new Error('Bad server response')); }
+            } else reject(new Error('Upload failed: ' + xhr.status));
+          };
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.send(formData);
+        });
+
+        setUploadProgress({ pct: 99, label: 'Отправка...' });
+        const payload = JSON.stringify({
+          type: 'voice',
+          voice: { fileId, mime: mimeType, duration: Math.max(1, duration) },
+        });
+        const { iv: msgIv, data: msgData } = await encryptMessage(cryptoKey, payload);
+        socketRef.current.emit('message', {
+          roomId,
+          encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick },
+        });
+        setUploadProgress({ pct: 100, label: 'Готово!' });
+        setTimeout(() => setUploadProgress(null), 800);
+      } catch (err) {
+        console.error('Voice send error:', err);
+        setUploadProgress(null);
+        alert('Ошибка отправки голосового: ' + err.message);
+      } finally {
+        setImgLoading(false);
+      }
+    };
+    mr.stop();
+  }, [isRecording, cryptoKey, nickname, roomId, socketRef]);
+
+  const handleMicPointerMove = useCallback((e) => {
+    if (!isRecording) return;
+    const currentY = e.clientY ?? e.touches?.[0]?.clientY ?? recordStartYRef.current;
+    setCancelRecord(currentY < recordStartYRef.current - 60);
+  }, [isRecording]);
+
+  // Cancel recording if pointer leaves window
+  const handleMicPointerLeave = useCallback((e) => {
+    if (!isRecording) return;
+    // Only cancel if truly left the window (not just the button)
+    if (e.target === document.documentElement || !e.relatedTarget) {
+      handleMicPointerUp(e);
+    }
+  }, [isRecording, handleMicPointerUp]);
+
   const placeholder = disabled ? 'Переподключение...'
     : imgLoading ? 'Шифрование...'
     : replyTo ? 'Ответ на сообщение...'
     : 'Сообщение от ' + nickname + '...';
 
   const emojiCls = 'emoji-toggle-btn' + (showEmoji ? ' active' : '');
+  const showSendBtn = !!text.trim();
 
   return (
     <div className="input-area">
@@ -249,71 +423,86 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
         </div>
       )}
 
+      {/* Recording overlay */}
+      {isRecording && (
+        <div className={'recording-overlay' + (cancelRecord ? ' cancel' : '')}>
+          <span className="recording-dot" />
+          <span className="recording-time">{formatRecTime(recordingTime)}</span>
+          <span className="recording-cancel-hint">
+            {cancelRecord ? '🗑 Отпустите для отмены' : '↑ Потяните вверх для отмены'}
+          </span>
+        </div>
+      )}
+
       <div className="input-wrapper">
         {/* ── Desktop: all buttons visible ── */}
-        <button
-          type="button"
-          className={emojiCls + ' desktop-only'}
-          onClick={() => setShowEmoji(v => !v)}
-          disabled={disabled}
-          title="Эмодзи"
-        >😊</button>
+        {!isRecording && (
+          <>
+            <button
+              type="button"
+              className={emojiCls + ' desktop-only'}
+              onClick={() => setShowEmoji(v => !v)}
+              disabled={disabled}
+              title="Эмодзи"
+            >😊</button>
 
-        <button
-          type="button"
-          className="img-upload-btn desktop-only"
-          onClick={() => imageInputRef.current?.click()}
-          disabled={disabled || imgLoading}
-          title="Отправить фото"
-        >
-          {imgLoading ? <span className="spinner" style={{width:'16px',height:'16px'}} /> : '🖼️'}
-        </button>
+            <button
+              type="button"
+              className="img-upload-btn desktop-only"
+              onClick={() => imageInputRef.current?.click()}
+              disabled={disabled || imgLoading}
+              title="Отправить фото"
+            >
+              {imgLoading ? <span className="spinner" style={{width:'16px',height:'16px'}} /> : '🖼️'}
+            </button>
 
-        <button
-          type="button"
-          className="img-upload-btn desktop-only"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || imgLoading}
-          title="Отправить файл"
-        >📎</button>
+            <button
+              type="button"
+              className="img-upload-btn desktop-only"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || imgLoading}
+              title="Отправить файл"
+            >📎</button>
 
-        <button
-          type="button"
-          className="img-upload-btn desktop-only"
-          onClick={() => setShowPdfTools(v => !v)}
-          disabled={disabled || imgLoading}
-          title="PDF инструменты (объединить / разбить)"
-        >📄</button>
+            <button
+              type="button"
+              className="img-upload-btn desktop-only"
+              onClick={() => setShowPdfTools(v => !v)}
+              disabled={disabled || imgLoading}
+              title="PDF инструменты (объединить / разбить)"
+            >📄</button>
 
-        {/* ── Mobile: single attach button with popup menu ── */}
-        <div className="attach-menu-wrap mobile-only">
-          <button
-            type="button"
-            className={'img-upload-btn' + (showAttachMenu ? ' active' : '')}
-            onClick={(e) => { e.stopPropagation(); setShowAttachMenu(v => !v); }}
-            disabled={disabled || imgLoading}
-            title="Вложения"
-          >
-            {imgLoading ? <span className="spinner" style={{width:'16px',height:'16px'}} /> : '📎'}
-          </button>
-
-          {showAttachMenu && (
-            <div className="attach-menu" onClick={e => e.stopPropagation()}>
-              <button className="attach-menu-item" onClick={() => { setShowEmoji(v => !v); setShowAttachMenu(false); }}>
-                <span>😊</span> Эмодзи
+            {/* ── Mobile: single attach button with popup menu ── */}
+            <div className="attach-menu-wrap mobile-only">
+              <button
+                type="button"
+                className={'img-upload-btn' + (showAttachMenu ? ' active' : '')}
+                onClick={(e) => { e.stopPropagation(); setShowAttachMenu(v => !v); }}
+                disabled={disabled || imgLoading}
+                title="Вложения"
+              >
+                {imgLoading ? <span className="spinner" style={{width:'16px',height:'16px'}} /> : '📎'}
               </button>
-              <button className="attach-menu-item" onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }}>
-                <span>🖼️</span> Фото
-              </button>
-              <button className="attach-menu-item" onClick={() => { fileInputRef.current?.click(); setShowAttachMenu(false); }}>
-                <span>📁</span> Файл
-              </button>
-              <button className="attach-menu-item" onClick={() => { setShowPdfTools(v => !v); setShowAttachMenu(false); }}>
-                <span>📄</span> PDF инструменты
-              </button>
+
+              {showAttachMenu && (
+                <div className="attach-menu" onClick={e => e.stopPropagation()}>
+                  <button className="attach-menu-item" onClick={() => { setShowEmoji(v => !v); setShowAttachMenu(false); }}>
+                    <span>😊</span> Эмодзи
+                  </button>
+                  <button className="attach-menu-item" onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }}>
+                    <span>🖼️</span> Фото
+                  </button>
+                  <button className="attach-menu-item" onClick={() => { fileInputRef.current?.click(); setShowAttachMenu(false); }}>
+                    <span>📁</span> Файл
+                  </button>
+                  <button className="attach-menu-item" onClick={() => { setShowPdfTools(v => !v); setShowAttachMenu(false); }}>
+                    <span>📄</span> PDF инструменты
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
 
         <input
           ref={imageInputRef}
@@ -337,21 +526,38 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
           onChange={e => { setText(e.target.value); if (e.target.value) notifyTyping(); else stopTyping(); }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          disabled={disabled || imgLoading}
+          disabled={disabled || imgLoading || isRecording}
           rows={1}
           className="message-textarea"
         />
 
-        <button
-          className="send-btn"
-          onClick={handleSend}
-          disabled={disabled || !text.trim() || imgLoading}
-          aria-label="Отправить"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-          </svg>
-        </button>
+        {/* Send or Mic button */}
+        {showSendBtn ? (
+          <button
+            className="send-btn"
+            onClick={handleSend}
+            disabled={disabled || !text.trim() || imgLoading}
+            aria-label="Отправить"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            className={'mic-btn' + (isRecording ? ' recording' : '') + (cancelRecord ? ' cancel' : '')}
+            onPointerDown={handleMicPointerDown}
+            onPointerUp={handleMicPointerUp}
+            onPointerMove={handleMicPointerMove}
+            onPointerLeave={handleMicPointerLeave}
+            onPointerCancel={handleMicPointerUp}
+            disabled={disabled || imgLoading}
+            aria-label={isRecording ? 'Остановить запись' : 'Записать голосовое'}
+            title={isRecording ? 'Отпустите для отправки' : 'Удерживайте для записи'}
+          >
+            {isRecording ? '⏹' : '🎙'}
+          </button>
+        )}
       </div>
 
       {showEmoji && (

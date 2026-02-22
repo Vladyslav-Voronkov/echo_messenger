@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import ImageMessage from './ImageMessage.jsx';
 import FileMessage from './FileMessage.jsx';
+import VoiceMessage from './VoiceMessage.jsx';
 
 function parseMessage(raw) {
   try {
@@ -10,6 +11,9 @@ function parseMessage(raw) {
     }
     if (parsed && parsed.type === 'file' && parsed.file) {
       return { type: 'file', fileData: parsed.file, replyTo: null };
+    }
+    if (parsed && parsed.type === 'voice' && parsed.voice) {
+      return { type: 'voice', voiceData: parsed.voice, replyTo: null };
     }
     if (parsed && typeof parsed.text === 'string') {
       return { type: 'text', text: parsed.text, replyTo: parsed.replyTo || null };
@@ -46,7 +50,9 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
       ? '📸 Фотография'
       : parsed.type === 'file'
         ? ('📎 ' + (parsed.fileData && parsed.fileData.name ? parsed.fileData.name : 'Файл'))
-        : (parsed.text || message.text);
+        : parsed.type === 'voice'
+          ? '🎙 Голосовое сообщение'
+          : (parsed.text || message.text);
     onReply({ id: message.id, nick, text: replyText });
   };
 
@@ -91,6 +97,14 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
           <ImageMessage imageData={parsed.imageData} cryptoKey={cryptoKey} roomId={roomId} />
         ) : parsed.type === 'file' ? (
           <FileMessage fileData={parsed.fileData} cryptoKey={cryptoKey} roomId={roomId} />
+        ) : parsed.type === 'voice' ? (
+          <VoiceMessage
+            fileId={parsed.voiceData.fileId}
+            mime={parsed.voiceData.mime}
+            duration={parsed.voiceData.duration}
+            cryptoKey={cryptoKey}
+            roomId={roomId}
+          />
         ) : (
           <p className="message-text">{displayText}</p>
         )}
