@@ -97,12 +97,12 @@ export default function AuthScreen({ onAuth }) {
       <div className="login-card glass">
 
         <div className="login-logo">
-          <span className="app-logo-text">LC</span>
+          <span className="app-logo-text">EM</span>
         </div>
 
         <div className="login-header">
-          <h1 className="login-title">LEGITCHAT</h1>
-          <p className="login-subtitle">Зашифрованный мессенджер с нулевым знанием сервера</p>
+          <h1 className="login-title">ECHO MESSENGER</h1>
+          <p className="login-subtitle">Зашифрованный. Приватный. Надёжный.</p>
         </div>
 
         {/* Tabs */}
@@ -195,7 +195,7 @@ export default function AuthScreen({ onAuth }) {
         </form>
 
         <div className="login-security-badges">
-          <span className="badge">Аккаунт на сервере</span>
+          <span className="badge">Сервер не видит данные</span>
           <span className="badge">AES-256-GCM</span>
           <span className="badge">Zero Knowledge</span>
         </div>

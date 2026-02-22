@@ -4,20 +4,43 @@ import RoomScreen from './components/RoomScreen.jsx';
 import ChatScreen from './components/ChatScreen.jsx';
 import { deriveRoomId, deriveKey } from './utils/crypto.js';
 
+const SESSION_KEY = 'echo_session';
+const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function loadSavedSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed.nickname || !parsed.expiresAt) return null;
+    if (Date.now() > parsed.expiresAt) {
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Phases:
- *   'auth'     — account screen (register / login with password)
- *   'room'     — room selection (enter seed phrase)
- *   'deriving' — PBKDF2 running (~300ms)
- *   'chat'     — active chat
+ *   'auth'     — account screen (register / login)
+ *   'room'     — enter channel key (seed phrase)
+ *   'deriving' — PBKDF2 key derivation running
+ *   'chat'     — active encrypted chat
  */
 export default function App() {
-  const [phase, setPhase] = useState('auth');
-  const [account, setAccount] = useState(null);
+  // Lazy initializers: read localStorage once on mount
+  const [phase, setPhase] = useState(() => loadSavedSession() ? 'room' : 'auth');
+  const [account, setAccount] = useState(() => loadSavedSession());
   const [session, setSession] = useState(null);
   const [error, setError] = useState('');
 
   const handleAuth = useCallback((accountData) => {
+    // Save session for 30 days (nickname only, never password)
+    const toSave = { ...accountData, expiresAt: Date.now() + SESSION_TTL };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(toSave));
     setAccount(accountData);
     setPhase('room');
   }, []);
@@ -45,6 +68,7 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(() => {
+    localStorage.removeItem(SESSION_KEY);
     setAccount(null);
     setSession(null);
     setPhase('auth');

@@ -15,21 +15,21 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
       <div className="login-card glass">
 
         <div className="login-logo">
-          <span className="app-logo-text">LC</span>
+          <span className="app-logo-text">EM</span>
         </div>
 
         <div className="login-header">
-          <h1 className="login-title">LEGITCHAT</h1>
+          <h1 className="login-title">ECHO MESSENGER</h1>
           <div className="room-account-info">
             <span className="room-nick">👤 {account.nickname}</span>
-            <button className="link-btn" onClick={onLogout}>Сменить аккаунт</button>
+            <button className="link-btn" onClick={onLogout}>Выйти</button>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
           <div className="field-group">
             <label htmlFor="seedphrase">
-              Сид-фраза комнаты
+              Ключ канала
               <span className="label-hint"> — ключ доступа и шифрования</span>
             </label>
             <div className="seed-input-wrapper">
@@ -38,7 +38,7 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
                 type={showSeed ? 'text' : 'password'}
                 value={seedPhrase}
                 onChange={e => setSeedPhrase(e.target.value)}
-                placeholder="Введите фразу для входа в комнату"
+                placeholder="Введите ключ для входа в канал"
                 disabled={isLoading}
                 autoComplete="off"
                 autoCorrect="off"
@@ -56,7 +56,7 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
               </button>
             </div>
             <p className="field-hint">
-              Любой с этой же фразой может войти и читать эту комнату. Сервер видит только хэш.
+              Любой с тем же ключом может войти в канал. Сервер видит только хэш.
             </p>
           </div>
 
@@ -72,7 +72,7 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
                 <span className="spinner" /> Генерация ключа...
               </span>
             ) : (
-              'Войти в комнату'
+              'Войти в канал'
             )}
           </button>
         </form>

@@ -106,9 +106,9 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     <div className="chat-container">
       <header className="chat-header glass">
         <div className="header-left">
-          <div className="header-logo">LC</div>
+          <div className="header-logo">EM</div>
           <div className="header-info">
-            <span className="header-title">LEGITCHAT</span>
+            <span className="header-title">ECHO</span>
             <span className={'header-status ' + statusInfo.cls}>{statusInfo.label}</span>
           </div>
         </div>

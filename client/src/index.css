@@ -652,7 +652,7 @@ body {
 /*  AUTH SCREEN additions                                                      */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
-/* App logo text (LC) — replaces emoji lock */
+/* App logo text (EM) — ECHO MESSENGER logo */
 .app-logo-text {
   display: flex;
   align-items: center;
@@ -661,15 +661,25 @@ body {
   height: 64px;
   border-radius: 20px;
   background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%);
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 900;
   color: #fff;
-  letter-spacing: -1px;
+  letter-spacing: -0.5px;
   margin: 0 auto;
   box-shadow:
     0 8px 32px rgba(79, 142, 247, 0.4),
     0 0 0 1px rgba(255,255,255,0.1);
   animation: glow 3s ease-in-out infinite;
+}
+
+/* Tagline under ECHO MESSENGER title */
+.echo-tagline {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
 }
 
 /* Auth tabs (Вход / Регистрация) */
