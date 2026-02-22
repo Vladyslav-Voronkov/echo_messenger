@@ -69,10 +69,15 @@ async function saveAccounts(accounts) {
   await fs.rename(tmp, ACCOUNTS_FILE);
 }
 
-// ── In-memory state ──────────────────────────────────────────────────────
+// ── In-memory state ──────────────────────────────────────────────────────────
 
-// Map<roomId, Set<socketId>>
+// Map<roomId, Map<encryptedNick, Set<socketId>>>
+// One nick can have multiple tabs/sockets — we count unique nicks.
 const roomMembers = new Map();
+
+// Map<socketId, { roomId, encNick, active }>
+// Tracks which room+nick each socket belongs to and if the tab is active.
+const socketMeta = new Map();
 
 // Map<roomId, Map<encryptedNick, upToTs>> — read receipts (in-memory only)
 const readReceipts = new Map();
@@ -86,6 +91,19 @@ const roomPins = new Map();
 // Load persisted likes and pins into Maps
 await loadLikes();
 await loadPins();
+
+// ── Helper: get count of UNIQUE nicks in a room (ignoring inactive-only nicks) ──
+// We count a nick as "online" if at least ONE of its sockets is active.
+function getRoomCount(roomId) {
+  const nicks = roomMembers.get(roomId);
+  if (!nicks) return 0;
+  let count = 0;
+  for (const [_encNick, sockets] of nicks) {
+    // Count this nick if it has at least one socket (active or inactive)
+    if (sockets.size > 0) count++;
+  }
+  return count;
+}
 
 // ── Likes storage ────────────────────────────────────────────────────────
 
@@ -330,10 +348,24 @@ app.get('/files/:roomId/:fileId/meta', async (req, res) => {
 // ── Static client (production) ───────────────────────────────────────────────
 const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
 
-app.use(express.static(CLIENT_DIST));
+// Static assets (JS/CSS have hashed filenames — cache them aggressively)
+app.use(express.static(CLIENT_DIST, {
+  setHeaders: (res, filePath) => {
+    // Never cache index.html — always serve fresh so the browser picks up new JS/CSS hashes
+    if (filePath.endsWith('index.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+    } else {
+      // Hashed assets can be cached forever
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+  },
+}));
 
-// SPA fallback — any unmatched route returns index.html
+// SPA fallback — any unmatched route returns index.html (no cache)
 app.get('*', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
   res.sendFile(path.join(CLIENT_DIST, 'index.html'), (err) => {
     if (err) res.status(404).end();
   });
@@ -352,28 +384,66 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e6, // 1MB — socket messages are text only now
 });
 
-function getRoomCount(roomId) {
-  return roomMembers.get(roomId)?.size ?? 0;
+// ── Room member helpers ──────────────────────────────────────────────────────
+
+function addMember(roomId, encNick, socketId) {
+  if (!roomMembers.has(roomId)) roomMembers.set(roomId, new Map());
+  const nicks = roomMembers.get(roomId);
+  if (!nicks.has(encNick)) nicks.set(encNick, new Set());
+  nicks.get(encNick).add(socketId);
 }
+
+function removeMember(roomId, encNick, socketId) {
+  const nicks = roomMembers.get(roomId);
+  if (!nicks) return;
+  const sockets = nicks.get(encNick);
+  if (sockets) {
+    sockets.delete(socketId);
+    if (sockets.size === 0) nicks.delete(encNick);
+  }
+  if (nicks.size === 0) roomMembers.delete(roomId);
+}
+
+// Returns true if this nick has NO other sockets in the room (i.e. last tab)
+function isLastSocket(roomId, encNick, socketId) {
+  const sockets = roomMembers.get(roomId)?.get(encNick);
+  if (!sockets) return true;
+  return sockets.size === 0 || (sockets.size === 1 && sockets.has(socketId));
+}
+
+// ── Socket handlers ──────────────────────────────────────────────────────────
 
 io.on('connection', (socket) => {
   let currentRoom = null;
-  let currentNick = null;
+  let currentNick = null; // encrypted nick
 
   socket.on('join', async ({ roomId, nick }) => {
     if (!isValidRoomId(roomId)) {
       socket.emit('error', { message: 'Invalid room ID' });
       return;
     }
+
     currentRoom = roomId;
     currentNick = nick || null;
+
     socket.join(roomId);
-    if (!roomMembers.has(roomId)) roomMembers.set(roomId, new Set());
-    roomMembers.get(roomId).add(socket.id);
+    if (currentNick) addMember(roomId, currentNick, socket.id);
+
+    socketMeta.set(socket.id, { roomId, encNick: currentNick, active: true });
+
     io.to(roomId).emit('online_count', { count: getRoomCount(roomId) });
 
-    // Notify others that someone joined (encrypted nick) and persist the event
-    if (nick) {
+    // Only notify others + persist if this is the FIRST socket for this nick in this room
+    if (nick && isLastSocket(roomId, nick, socket.id) === false) {
+      // Not last — means we just added one MORE tab, others already know this nick is here
+      // Actually we need to check BEFORE adding: if nick already had sockets, don't re-announce
+    }
+
+    // Announce join only if this nick had no other sockets before this one joined
+    const socketsForNick = roomMembers.get(roomId)?.get(nick);
+    const isFirstSocket = socketsForNick && socketsForNick.size === 1; // we already added this one
+
+    if (nick && isFirstSocket) {
       const joinEvent = { type: 'system', subtype: 'join', nick, ts: Date.now() };
       const filePath = path.join(CHATS_DIR, `${roomId}.txt`);
       await fs.appendFile(filePath, JSON.stringify(joinEvent) + '\n', 'utf8').catch(() => {});
@@ -502,19 +572,36 @@ io.on('connection', (socket) => {
     if (typeof callback === 'function') callback();
   });
 
+  // Tab visibility: client sends this when tab becomes hidden/visible
+  socket.on('set_active', ({ active }) => {
+    const meta = socketMeta.get(socket.id);
+    if (!meta) return;
+    meta.active = !!active;
+    // No count change — we count unique nicks regardless of active state.
+    // But we could use this in the future for "away" indicator.
+  });
+
   socket.on('disconnect', async () => {
-    if (currentRoom && roomMembers.has(currentRoom)) {
-      roomMembers.get(currentRoom).delete(socket.id);
-      const count = getRoomCount(currentRoom);
-      io.to(currentRoom).emit('online_count', { count });
-      // Notify others that someone left (encrypted nick) and persist
-      if (currentNick) {
-        socket.to(currentRoom).emit('user_left', { nick: currentNick });
-        const leaveEvent = { type: 'system', subtype: 'leave', nick: currentNick, ts: Date.now() };
-        const filePath = path.join(CHATS_DIR, `${currentRoom}.txt`);
-        await fs.appendFile(filePath, JSON.stringify(leaveEvent) + '\n', 'utf8').catch(() => {});
-      }
-      if (count === 0) roomMembers.delete(currentRoom);
+    const meta = socketMeta.get(socket.id);
+    socketMeta.delete(socket.id);
+
+    const roomId = currentRoom || meta?.roomId;
+    const encNick = currentNick || meta?.encNick;
+
+    if (!roomId) return;
+
+    if (encNick) removeMember(roomId, encNick, socket.id);
+
+    const count = getRoomCount(roomId);
+    io.to(roomId).emit('online_count', { count });
+
+    // Only announce leave + persist if this was the LAST socket for this nick
+    const stillHasSockets = (roomMembers.get(roomId)?.get(encNick)?.size ?? 0) > 0;
+    if (encNick && !stillHasSockets) {
+      socket.to(roomId).emit('user_left', { nick: encNick });
+      const leaveEvent = { type: 'system', subtype: 'leave', nick: encNick, ts: Date.now() };
+      const filePath = path.join(CHATS_DIR, `${roomId}.txt`);
+      await fs.appendFile(filePath, JSON.stringify(leaveEvent) + '\n', 'utf8').catch(() => {});
     }
   });
 });

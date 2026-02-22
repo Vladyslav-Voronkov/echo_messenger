@@ -320,7 +320,16 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       } catch { /* ignore */ }
     });
 
+    // Page Visibility API — send set_active when tab is hidden/shown
+    const onVisibilityChange = () => {
+      if (socket.connected) {
+        socket.emit('set_active', { active: document.visibilityState === 'visible' });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       clearInterval(pingIntervalRef.current);
       socket.disconnect();
     };
