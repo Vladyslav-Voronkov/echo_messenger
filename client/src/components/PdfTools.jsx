@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { PDFDocument } from 'pdf-lib';
-import { encryptImageBuffer, encryptNick, encryptMessage } from '../utils/crypto.js';
+import { encryptFileToBinary, encryptNick, encryptMessage } from '../utils/crypto.js';
 
 function formatSize(bytes) {
   if (!bytes) return '';
@@ -396,13 +396,41 @@ export default function PdfTools({ cryptoKey, roomId, socketRef, nickname, onClo
     setSending(true);
     try {
       const buf = bytes instanceof Uint8Array ? bytes.buffer : bytes;
-      const encFile = await encryptImageBuffer(cryptoKey, buf, 'application/pdf');
-      const encNick = await encryptNick(cryptoKey, nickname);
       const size = bytes instanceof Uint8Array ? bytes.length : bytes.byteLength;
-      const fileInfo = { iv: encFile.iv, data: encFile.data, mime: 'application/pdf', name, size };
-      const payload = JSON.stringify({ type: 'file', file: fileInfo });
-      const { iv, data } = await encryptMessage(cryptoKey, payload);
-      socketRef.current.emit('message', { roomId, encrypted: { iv, data, ts: Date.now(), nick: encNick } });
+      const mime = 'application/pdf';
+
+      // 1. Encrypt to binary blob (same as regular file upload)
+      const { iv, blob: encBlob } = await encryptFileToBinary(cryptoKey, buf);
+      const encNick = await encryptNick(cryptoKey, nickname);
+
+      // 2. Upload via XHR to /upload/:roomId
+      const meta = JSON.stringify({ iv, nick: encNick, name, mime, size, ts: Date.now() });
+      const formData = new FormData();
+      formData.append('file', encBlob, 'encrypted.bin');
+
+      const fileId = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/upload/' + roomId);
+        xhr.setRequestHeader('x-file-meta', meta);
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            try { resolve(JSON.parse(xhr.responseText).fileId); }
+            catch { reject(new Error('Bad server response')); }
+          } else {
+            reject(new Error('Upload failed: ' + xhr.status));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(formData);
+      });
+
+      // 3. Send small socket message referencing the uploaded file
+      const payload = JSON.stringify({ type: 'file', file: { fileId, name, mime, size } });
+      const { iv: msgIv, data: msgData } = await encryptMessage(cryptoKey, payload);
+      socketRef.current.emit('message', {
+        roomId,
+        encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick },
+      });
     } finally { setSending(false); }
   }, [cryptoKey, nickname, roomId, socketRef]);
 
@@ -422,7 +450,7 @@ export default function PdfTools({ cryptoKey, roomId, socketRef, nickname, onClo
         {sending && (
           <div className="pdftool-sending">
             <span className="spinner" style={{width:'16px',height:'16px'}} />
-            <span>Шифрование и отправка в чат...</span>
+            <span>Шифрование и загрузка на сервер...</span>
           </div>
         )}
 

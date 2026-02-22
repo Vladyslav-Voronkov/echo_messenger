@@ -8,9 +8,12 @@ import { encryptMessage, encryptNick, decryptNick, decryptMessageObject } from '
 // In production: server serves the built client, so same origin = correct.
 const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
+const BATCH = 50; // messages to render per window
+
 export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const { nickname, roomId, cryptoKey } = session;
   const [messages, setMessages] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(BATCH);
   const [onlineCount, setOnlineCount] = useState(0);
   const [status, setStatus] = useState('connecting');
   const [replyTo, setReplyTo] = useState(null);
@@ -20,10 +23,22 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const messagesEndRef = useRef(null);
   const messagesAreaRef = useRef(null);
   const loadedRef = useRef(false);
+  const prevLenRef = useRef(0);
 
+  // Reset visible window when room changes
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    setVisibleCount(BATCH);
+    prevLenRef.current = 0;
+  }, [roomId]);
+
+  // Auto-scroll to bottom only when a new message arrives (not when loading older ones)
+  useEffect(() => {
+    const added = messages.length - prevLenRef.current;
+    prevLenRef.current = messages.length;
+    if (added > 0 && visibleCount >= messages.length) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, visibleCount]);
 
   const loadHistory = useCallback(async () => {
     if (loadedRef.current) return;
@@ -133,6 +148,18 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     setTimeout(() => setHighlightId(null), 1500);
   }, []);
 
+  // Load older messages when user scrolls near the top
+  const handleScroll = useCallback((e) => {
+    const el = e.currentTarget;
+    if (el.scrollTop < 80 && visibleCount < messages.length) {
+      const prevScrollHeight = el.scrollHeight;
+      setVisibleCount(v => Math.min(v + BATCH, messages.length));
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight - prevScrollHeight;
+      });
+    }
+  }, [visibleCount, messages.length]);
+
   const statusInfo = {
     connecting: { label: 'Подключение...', cls: 'status-connecting' },
     online:     { label: '🔒 Зашифровано', cls: 'status-online' },
@@ -177,7 +204,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         </div>
       </header>
 
-      <main className="messages-area" ref={messagesAreaRef}>
+      <main className="messages-area" ref={messagesAreaRef} onScroll={handleScroll}>
         {messages.length === 0 && status === 'online' && (
           <div className="empty-state">
             <div className="empty-icon">💬</div>
@@ -185,7 +212,10 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
             <p className="empty-hint">Напишите первое сообщение. Оно будет зашифровано.</p>
           </div>
         )}
-        {messages.map(msg => (
+        {visibleCount < messages.length && (
+          <div className="load-more-hint">▲ Прокрутите вверх для загрузки старых сообщений</div>
+        )}
+        {messages.slice(-visibleCount).map(msg => (
           <Message
             key={msg.id}
             message={msg}

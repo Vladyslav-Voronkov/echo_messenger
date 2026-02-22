@@ -463,6 +463,15 @@ body {
 .empty-title { font-size: 16px; font-weight: 500; color: var(--text-2); }
 .empty-hint { font-size: 13px; }
 
+.load-more-hint {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 6px 20px;
+  opacity: 0.6;
+  user-select: none;
+}
+
 /* ── Message Bubbles ────────────────────────────────────────────────────── */
 .message-row {
   display: flex;
