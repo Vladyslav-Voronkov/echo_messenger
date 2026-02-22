@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import Message from './Message.jsx';
 import MessageInput from './MessageInput.jsx';
-import { encryptMessage, encryptNick, decryptMessageObject } from '../utils/crypto.js';
+import { encryptMessage, encryptNick, decryptNick, decryptMessageObject } from '../utils/crypto.js';
 
 // In dev: Vite proxies /socket.io → localhost:3001 automatically.
 // In production: server serves the built client, so same origin = correct.
@@ -15,6 +15,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const [status, setStatus] = useState('connecting');
   const [replyTo, setReplyTo] = useState(null);
   const [highlightId, setHighlightId] = useState(null);
+  const [typingUsers, setTypingUsers] = useState(new Set());
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const messagesAreaRef = useRef(null);
@@ -58,17 +59,45 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       socket.emit('join', { roomId });
       loadHistory();
     });
-    socket.on('disconnect', () => setStatus('offline'));
+    socket.on('disconnect', () => {
+      setStatus('offline');
+      setTypingUsers(new Set()); // clear typing on disconnect
+    });
     socket.on('connect_error', () => setStatus('offline'));
     socket.on('online_count', ({ count }) => setOnlineCount(count));
 
     socket.on('message', async ({ encrypted }) => {
       const msg = await decryptMessageObject(cryptoKey, encrypted);
       if (!msg) return;
+      // When a message arrives, remove that nick from typing set
+      setTypingUsers(prev => {
+        const s = new Set(prev);
+        s.delete(msg.nick);
+        return s;
+      });
       setMessages(prev => [
         ...prev,
         { ...msg, id: 'live-' + Date.now() + '-' + Math.random(), isOwn: msg.nick === nickname },
       ]);
+    });
+
+    socket.on('typing', async ({ nick: encNick }) => {
+      try {
+        const plainNick = await decryptNick(cryptoKey, encNick);
+        if (plainNick === nickname) return; // ignore own echoes if any
+        setTypingUsers(prev => new Set([...prev, plainNick]));
+      } catch { /* ignore decrypt errors */ }
+    });
+
+    socket.on('stop_typing', async ({ nick: encNick }) => {
+      try {
+        const plainNick = await decryptNick(cryptoKey, encNick);
+        setTypingUsers(prev => {
+          const s = new Set(prev);
+          s.delete(plainNick);
+          return s;
+        });
+      } catch { /* ignore decrypt errors */ }
     });
 
     return () => socket.disconnect();
@@ -84,6 +113,14 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     socketRef.current.emit('message', { roomId, encrypted: { iv, data, ts: Date.now(), nick: encNick } });
     setReplyTo(null);
   }, [cryptoKey, nickname, roomId, replyTo]);
+
+  const handleTyping = useCallback(async (isTyping) => {
+    if (!socketRef.current?.connected) return;
+    try {
+      const encNick = await encryptNick(cryptoKey, nickname);
+      socketRef.current.emit(isTyping ? 'typing' : 'stop_typing', { roomId, nick: encNick });
+    } catch { /* ignore */ }
+  }, [cryptoKey, nickname, roomId]);
 
   const handleReply = useCallback((msg) => setReplyTo({ id: msg.id, nick: msg.nick, text: msg.text }), []);
   const handleCancelReply = useCallback(() => setReplyTo(null), []);
@@ -102,8 +139,25 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     offline:    { label: 'Переподключение...', cls: 'status-offline' },
   }[status];
 
+  // Build typing label
+  const typingArr = [...typingUsers];
+  let typingLabel = '';
+  if (typingArr.length === 1) typingLabel = typingArr[0] + ' печатает...';
+  else if (typingArr.length === 2) typingLabel = typingArr.join(' и ') + ' печатают...';
+  else if (typingArr.length > 2) typingLabel = 'Несколько человек печатают...';
+
   return (
     <div className="chat-container">
+
+      {/* ── Preloader overlay while connecting ── */}
+      {status === 'connecting' && (
+        <div className="chat-preloader">
+          <div className="preloader-logo">EM</div>
+          <div className="preloader-spinner" />
+          <p className="preloader-text">Подключение к каналу...</p>
+        </div>
+      )}
+
       <header className="chat-header glass">
         <div className="header-left">
           <div className="header-logo">EM</div>
@@ -127,14 +181,8 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         {messages.length === 0 && status === 'online' && (
           <div className="empty-state">
             <div className="empty-icon">💬</div>
-            <p className="empty-title">Комната пуста</p>
+            <p className="empty-title">Канал пуст</p>
             <p className="empty-hint">Напишите первое сообщение. Оно будет зашифровано.</p>
-          </div>
-        )}
-        {messages.length === 0 && status === 'connecting' && (
-          <div className="empty-state">
-            <div className="spinner large" />
-            <p className="empty-hint" style={{ marginTop: 12 }}>Загрузка...</p>
           </div>
         )}
         {messages.map(msg => (
@@ -153,9 +201,22 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         <div ref={messagesEndRef} />
       </main>
 
+      {/* ── Typing indicator ── */}
+      <div className={'typing-indicator' + (typingUsers.size > 0 ? ' typing-indicator--visible' : '')}>
+        {typingUsers.size > 0 && (
+          <>
+            <span className="typing-dots">
+              <span /><span /><span />
+            </span>
+            <span className="typing-text">{typingLabel}</span>
+          </>
+        )}
+      </div>
+
       <footer className="chat-footer glass">
         <MessageInput
           onSend={handleSend}
+          onTyping={handleTyping}
           disabled={status !== 'online'}
           nickname={nickname}
           replyTo={replyTo}

@@ -5,8 +5,9 @@ import { encryptImageBuffer, encryptNick, encryptMessage } from '../utils/crypto
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024;
+const TYPING_DEBOUNCE_MS = 1500;
 
-export default function MessageInput({ onSend, disabled, nickname, replyTo, onCancelReply, cryptoKey, roomId, socketRef }) {
+export default function MessageInput({ onSend, onTyping, disabled, nickname, replyTo, onCancelReply, cryptoKey, roomId, socketRef }) {
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [showPdfTools, setShowPdfTools] = useState(false);
@@ -14,6 +15,8 @@ export default function MessageInput({ onSend, disabled, nickname, replyTo, onCa
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const typingTimerRef = useRef(null);
+  const isTypingRef = useRef(false);
 
   useEffect(() => {
     if (replyTo) textareaRef.current?.focus();
@@ -26,8 +29,32 @@ export default function MessageInput({ onSend, disabled, nickname, replyTo, onCa
     ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
   }, [text]);
 
+  // Notify parent that user started/stopped typing (debounced)
+  const notifyTyping = useCallback(() => {
+    if (!onTyping) return;
+    if (!isTypingRef.current) {
+      isTypingRef.current = true;
+      onTyping(true);
+    }
+    clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => {
+      isTypingRef.current = false;
+      onTyping(false);
+    }, TYPING_DEBOUNCE_MS);
+  }, [onTyping]);
+
+  const stopTyping = useCallback(() => {
+    if (!onTyping) return;
+    clearTimeout(typingTimerRef.current);
+    if (isTypingRef.current) {
+      isTypingRef.current = false;
+      onTyping(false);
+    }
+  }, [onTyping]);
+
   const handleSend = () => {
     if (!text.trim() || disabled) return;
+    stopTyping();
     onSend(text.trim());
     setText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -184,7 +211,7 @@ export default function MessageInput({ onSend, disabled, nickname, replyTo, onCa
         <textarea
           ref={textareaRef}
           value={text}
-          onChange={e => setText(e.target.value)}
+          onChange={e => { setText(e.target.value); if (e.target.value) notifyTyping(); else stopTyping(); }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled || imgLoading}

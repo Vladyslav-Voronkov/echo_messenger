@@ -216,6 +216,16 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('message', { encrypted });
   });
 
+  socket.on('typing', ({ roomId, nick }) => {
+    if (!isValidRoomId(roomId) || typeof nick !== 'string') return;
+    socket.to(roomId).emit('typing', { nick });
+  });
+
+  socket.on('stop_typing', ({ roomId, nick }) => {
+    if (!isValidRoomId(roomId) || typeof nick !== 'string') return;
+    socket.to(roomId).emit('stop_typing', { nick });
+  });
+
   socket.on('disconnect', () => {
     if (currentRoom && roomMembers.has(currentRoom)) {
       roomMembers.get(currentRoom).delete(socket.id);
