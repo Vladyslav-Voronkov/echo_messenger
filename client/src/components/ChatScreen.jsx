@@ -209,17 +209,14 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   // Keep likesRef in sync for handleLike
   likesRef.current = likes;
 
-  // Toggle like/unlike on a message
-  const handleLike = useCallback(async (msg) => {
+  // Toggle like/unlike on a message (plaintext nick — server deduplicates via Set)
+  const handleLike = useCallback((msg) => {
     if (!socketRef.current?.connected) return;
-    try {
-      const encNick = await encryptNick(cryptoKey, nickname);
-      const already = (likesRef.current[msg.ts] || []).includes(encNick);
-      socketRef.current.emit(already ? 'unlike' : 'like', {
-        roomId, msgTs: msg.ts, nick: encNick,
-      });
-    } catch { /* ignore */ }
-  }, [cryptoKey, nickname, roomId]);
+    const already = (likesRef.current[msg.ts] || []).includes(nickname);
+    socketRef.current.emit(already ? 'unlike' : 'like', {
+      roomId, msgTs: msg.ts, nick: nickname,
+    });
+  }, [nickname, roomId]);
 
   // Always keep sendReadRef.current pointing to the latest closure
   sendReadRef.current = async () => {

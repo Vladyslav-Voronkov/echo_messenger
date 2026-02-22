@@ -16,6 +16,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..');
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
+const LIKES_FILE = path.join(DATA_DIR, 'likes.json');
 const FILES_DIR = path.join(DATA_DIR, 'files');
 
 await fs.mkdir(CHATS_DIR, { recursive: true });
@@ -65,6 +66,48 @@ async function saveAccounts(accounts) {
   const tmp = ACCOUNTS_FILE + '.tmp';
   await fs.writeFile(tmp, JSON.stringify(accounts, null, 2), 'utf8');
   await fs.rename(tmp, ACCOUNTS_FILE);
+}
+
+// ── In-memory state ──────────────────────────────────────────────────────
+
+// Map<roomId, Set<socketId>>
+const roomMembers = new Map();
+
+// Map<roomId, Map<encryptedNick, upToTs>> — read receipts (in-memory only)
+const readReceipts = new Map();
+
+// Map<roomId, Map<msgTs_string, Set<plainNick>>> — message likes (persisted to likes.json)
+const messageLikes = new Map();
+
+// Load persisted likes into messageLikes Map
+await loadLikes();
+
+// ── Likes storage ────────────────────────────────────────────────────────
+
+async function loadLikes() {
+  try {
+    const raw = await fs.readFile(LIKES_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    for (const [roomId, msgs] of Object.entries(data)) {
+      messageLikes.set(roomId, new Map());
+      for (const [msgTs, nicks] of Object.entries(msgs)) {
+        messageLikes.get(roomId).set(msgTs, new Set(nicks));
+      }
+    }
+  } catch { /* file doesn't exist yet — start fresh */ }
+}
+
+async function saveLikes() {
+  const data = {};
+  for (const [roomId, msgs] of messageLikes) {
+    data[roomId] = {};
+    for (const [msgTs, nicks] of msgs) {
+      if (nicks.size > 0) data[roomId][msgTs] = [...nicks];
+    }
+  }
+  const tmp = LIKES_FILE + '.tmp';
+  await fs.writeFile(tmp, JSON.stringify(data), 'utf8');
+  await fs.rename(tmp, LIKES_FILE);
 }
 
 // ── Auth routes ──────────────────────────────────────────────────────────────
@@ -274,15 +317,6 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e6, // 1MB — socket messages are text only now
 });
 
-// Map<roomId, Set<socketId>>
-const roomMembers = new Map();
-
-// Map<roomId, Map<encryptedNick, upToTs>> — read receipts (in-memory only)
-const readReceipts = new Map();
-
-// Map<roomId, Map<msgTs_string, Set<encNick>>> — message likes (in-memory only)
-const messageLikes = new Map();
-
 function getRoomCount(roomId) {
   return roomMembers.get(roomId)?.size ?? 0;
 }
@@ -352,22 +386,25 @@ io.on('connection', (socket) => {
   });
 
   socket.on('like', ({ roomId, msgTs, nick }) => {
-    if (!isValidRoomId(roomId) || typeof nick !== 'string' || typeof msgTs !== 'number') return;
+    // nick is plaintext — allows correct deduplication via Set
+    if (!isValidRoomId(roomId) || !isValidNick(nick) || typeof msgTs !== 'number') return;
     if (!messageLikes.has(roomId)) messageLikes.set(roomId, new Map());
     const roomLikes = messageLikes.get(roomId);
     const key = String(msgTs);
     if (!roomLikes.has(key)) roomLikes.set(key, new Set());
-    roomLikes.get(key).add(nick);
+    roomLikes.get(key).add(nick.trim());
     io.to(roomId).emit('liked', { msgTs, nicks: [...roomLikes.get(key)] });
+    saveLikes().catch(() => {});
   });
 
   socket.on('unlike', ({ roomId, msgTs, nick }) => {
-    if (!isValidRoomId(roomId) || typeof nick !== 'string' || typeof msgTs !== 'number') return;
+    if (!isValidRoomId(roomId) || !isValidNick(nick) || typeof msgTs !== 'number') return;
     const roomLikes = messageLikes.get(roomId);
     if (!roomLikes) return;
     const key = String(msgTs);
-    roomLikes.get(key)?.delete(nick);
+    roomLikes.get(key)?.delete(nick.trim());
     io.to(roomId).emit('liked', { msgTs, nicks: [...(roomLikes.get(key) ?? [])] });
+    saveLikes().catch(() => {});
   });
 
   socket.on('disconnect', () => {

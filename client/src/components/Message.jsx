@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import ImageMessage from './ImageMessage.jsx';
 import FileMessage from './FileMessage.jsx';
-import { decryptNick } from '../utils/crypto.js';
 
 function parseMessage(raw) {
   try {
@@ -21,7 +20,6 @@ function parseMessage(raw) {
 
 export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike }) {
   const [hovered, setHovered] = useState(false);
-  const [likeNicks, setLikeNicks] = useState([]);
   const { nick, ts, isOwn } = message;
   const parsed = parseMessage(message.text);
 
@@ -29,13 +27,8 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
   const isRead = isOwn && readReceipts &&
     Object.values(readReceipts).some(upToTs => upToTs >= ts);
 
-  // Decrypt like nicks for display (first letter of each)
-  useEffect(() => {
-    if (!likes || likes.length === 0) { setLikeNicks([]); return; }
-    Promise.all(
-      likes.map(enc => decryptNick(cryptoKey, enc).catch(() => null))
-    ).then(nicks => setLikeNicks(nicks.filter(Boolean)));
-  }, [likes, cryptoKey]);
+  // likes is already an array of plaintext nicks (no decryption needed)
+  const likeNicks = likes || [];
 
   const time = new Date(ts).toLocaleTimeString('ru-RU', {
     hour: '2-digit', minute: '2-digit',
