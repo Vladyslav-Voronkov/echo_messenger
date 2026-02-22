@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ImageMessage from './ImageMessage.jsx';
 import FileMessage from './FileMessage.jsx';
+import { decryptNick } from '../utils/crypto.js';
 
 function parseMessage(raw) {
   try {
@@ -18,14 +19,23 @@ function parseMessage(raw) {
   return { type: 'text', text: raw, replyTo: null };
 }
 
-export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts }) {
+export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike }) {
   const [hovered, setHovered] = useState(false);
+  const [likeNicks, setLikeNicks] = useState([]);
   const { nick, ts, isOwn } = message;
   const parsed = parseMessage(message.text);
 
   // Show ✓✓ if at least one other user read up to (or past) this message's timestamp
   const isRead = isOwn && readReceipts &&
     Object.values(readReceipts).some(upToTs => upToTs >= ts);
+
+  // Decrypt like nicks for display (first letter of each)
+  useEffect(() => {
+    if (!likes || likes.length === 0) { setLikeNicks([]); return; }
+    Promise.all(
+      likes.map(enc => decryptNick(cryptoKey, enc).catch(() => null))
+    ).then(nicks => setLikeNicks(nicks.filter(Boolean)));
+  }, [likes, cryptoKey]);
 
   const time = new Date(ts).toLocaleTimeString('ru-RU', {
     hour: '2-digit', minute: '2-digit',
@@ -68,7 +78,7 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
         >↩</button>
       )}
 
-      <div className="message-bubble">
+      <div className="message-bubble" onDoubleClick={() => onLike(message)}>
         {!isOwn && <span className="message-nick">{nick}</span>}
 
         {replyTo && (
@@ -102,6 +112,17 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
           onClick={handleReplyClick}
           title="Ответить"
         >↩</button>
+      )}
+      {likes && likes.length > 0 && (
+        <div className={'like-badge' + (isOwn ? ' like-badge-own' : '')} onClick={() => onLike(message)}>
+          ❤️
+          {likes.length > 1 && <span className="like-count">{likes.length}</span>}
+          {likeNicks.length > 0 && (
+            <span className="like-nicks">
+              {likeNicks.map(n => n[0].toUpperCase()).join(' ')}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );

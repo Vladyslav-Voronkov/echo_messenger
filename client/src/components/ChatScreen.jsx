@@ -22,6 +22,8 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [readReceipts, setReadReceipts] = useState({});
   // { encryptedNick: upToTs } — tracks who read up to which timestamp
+  const [likes, setLikes] = useState({});
+  // { msgTs: [encNick, ...] } — who liked each message
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const messagesAreaRef = useRef(null);
@@ -30,6 +32,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const initialScrollDoneRef = useRef(false);
   const messagesRef = useRef([]);
   const sendReadRef = useRef(null);
+  const likesRef = useRef({});
 
   // Reset visible window and scroll flag when room changes
   useEffect(() => {
@@ -147,6 +150,11 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       setReadReceipts(prev => ({ ...prev, [nick]: upToTs }));
     });
 
+    socket.on('liked', ({ msgTs, nicks }) => {
+      if (typeof msgTs !== 'number' || !Array.isArray(nicks)) return;
+      setLikes(prev => ({ ...prev, [msgTs]: nicks }));
+    });
+
     return () => socket.disconnect();
   }, [roomId, cryptoKey, nickname, loadHistory]);
 
@@ -197,6 +205,21 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
+
+  // Keep likesRef in sync for handleLike
+  likesRef.current = likes;
+
+  // Toggle like/unlike on a message
+  const handleLike = useCallback(async (msg) => {
+    if (!socketRef.current?.connected) return;
+    try {
+      const encNick = await encryptNick(cryptoKey, nickname);
+      const already = (likesRef.current[msg.ts] || []).includes(encNick);
+      socketRef.current.emit(already ? 'unlike' : 'like', {
+        roomId, msgTs: msg.ts, nick: encNick,
+      });
+    } catch { /* ignore */ }
+  }, [cryptoKey, nickname, roomId]);
 
   // Always keep sendReadRef.current pointing to the latest closure
   sendReadRef.current = async () => {
@@ -282,6 +305,8 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
             roomId={roomId}
             nickname={nickname}
             readReceipts={readReceipts}
+            likes={likes[msg.ts] || []}
+            onLike={handleLike}
           />
         ))}
         <div ref={messagesEndRef} />

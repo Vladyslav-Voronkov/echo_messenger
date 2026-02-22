@@ -280,6 +280,9 @@ const roomMembers = new Map();
 // Map<roomId, Map<encryptedNick, upToTs>> — read receipts (in-memory only)
 const readReceipts = new Map();
 
+// Map<roomId, Map<msgTs_string, Set<encNick>>> — message likes (in-memory only)
+const messageLikes = new Map();
+
 function getRoomCount(roomId) {
   return roomMembers.get(roomId)?.size ?? 0;
 }
@@ -346,6 +349,25 @@ io.on('connection', (socket) => {
     readReceipts.get(roomId).set(nick, upToTs);
     // Broadcast to everyone in room (including sender — needed for multi-device)
     io.to(roomId).emit('read_by', { nick, upToTs });
+  });
+
+  socket.on('like', ({ roomId, msgTs, nick }) => {
+    if (!isValidRoomId(roomId) || typeof nick !== 'string' || typeof msgTs !== 'number') return;
+    if (!messageLikes.has(roomId)) messageLikes.set(roomId, new Map());
+    const roomLikes = messageLikes.get(roomId);
+    const key = String(msgTs);
+    if (!roomLikes.has(key)) roomLikes.set(key, new Set());
+    roomLikes.get(key).add(nick);
+    io.to(roomId).emit('liked', { msgTs, nicks: [...roomLikes.get(key)] });
+  });
+
+  socket.on('unlike', ({ roomId, msgTs, nick }) => {
+    if (!isValidRoomId(roomId) || typeof nick !== 'string' || typeof msgTs !== 'number') return;
+    const roomLikes = messageLikes.get(roomId);
+    if (!roomLikes) return;
+    const key = String(msgTs);
+    roomLikes.get(key)?.delete(nick);
+    io.to(roomId).emit('liked', { msgTs, nicks: [...(roomLikes.get(key) ?? [])] });
   });
 
   socket.on('disconnect', () => {
