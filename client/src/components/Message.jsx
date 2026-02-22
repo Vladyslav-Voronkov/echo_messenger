@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import ImageMessage from './ImageMessage.jsx';
 import FileMessage from './FileMessage.jsx';
-import { decryptNick } from '../utils/crypto.js';
 
 function parseMessage(raw) {
   try {
@@ -21,21 +20,12 @@ function parseMessage(raw) {
 
 export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts }) {
   const [hovered, setHovered] = useState(false);
-  const [readByNicks, setReadByNicks] = useState([]);
   const { nick, ts, isOwn } = message;
   const parsed = parseMessage(message.text);
 
-  // Decrypt read receipt nicks for own messages
-  useEffect(() => {
-    if (!isOwn || !readReceipts || !cryptoKey) return;
-    const entries = Object.entries(readReceipts);
-    if (entries.length === 0) return;
-    Promise.all(
-      entries
-        .filter(([, upToTs]) => upToTs >= ts)
-        .map(([encNick]) => decryptNick(cryptoKey, encNick).catch(() => null))
-    ).then(nicks => setReadByNicks(nicks.filter(Boolean)));
-  }, [readReceipts, isOwn, ts, cryptoKey]);
+  // Show ✓✓ if at least one other user read up to (or past) this message's timestamp
+  const isRead = isOwn && readReceipts &&
+    Object.values(readReceipts).some(upToTs => upToTs >= ts);
 
   const time = new Date(ts).toLocaleTimeString('ru-RU', {
     hour: '2-digit', minute: '2-digit',
@@ -103,11 +93,7 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
         )}
 
         <span className="message-time">{time}</span>
-        {isOwn && readByNicks.length > 0 && (
-          <span className="read-receipt" title={readByNicks.join(', ')}>
-            ✓✓ <span className="read-receipt-nicks">{readByNicks.join(', ')}</span>
-          </span>
-        )}
+        {isRead && <span className="read-receipt">✓✓</span>}
       </div>
 
       {isOwn && (
