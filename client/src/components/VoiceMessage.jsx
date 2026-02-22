@@ -13,34 +13,37 @@ function formatTime(secs) {
 }
 
 export default function VoiceMessage({ fileId, mime, duration, cryptoKey, roomId }) {
-  const [audioUrl, setAudioUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [realDuration, setRealDuration] = useState(duration || 0);
+  const [loaded, setLoaded] = useState(false);
   const audioRef = useRef(null);
-  const audioUrlRef = useRef(null);
+  const blobUrlRef = useRef(null);
 
   // Cleanup blob URL on unmount
   useEffect(() => {
     return () => {
-      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
     };
   }, []);
 
   const loadAudio = useCallback(async () => {
-    if (audioUrl) return audioUrl; // already loaded
+    if (loaded || isLoading) return blobUrlRef.current;
     setIsLoading(true);
     setError(null);
     try {
-      // 1. Fetch encrypted file
+      // 1. Fetch encrypted file + meta in parallel
       const [encRes, metaRes] = await Promise.all([
         fetch('/files/' + roomId + '/' + fileId),
         fetch('/files/' + roomId + '/' + fileId + '/meta'),
       ]);
-      if (!encRes.ok) throw new Error('Ошибка загрузки аудио');
-      if (!metaRes.ok) throw new Error('Ошибка загрузки мета');
+      if (!encRes.ok) throw new Error('Ошибка загрузки аудио (' + encRes.status + ')');
+      if (!metaRes.ok) throw new Error('Ошибка загрузки мета (' + metaRes.status + ')');
 
       const [cipherBuffer, meta] = await Promise.all([
         encRes.arrayBuffer(),
@@ -50,12 +53,28 @@ export default function VoiceMessage({ fileId, mime, duration, cryptoKey, roomId
       // 2. Decrypt
       const decrypted = await decryptFileFromBinary(cryptoKey, meta.iv, cipherBuffer);
 
-      // 3. Create blob URL
+      // 3. Create blob URL — use stored mime or fallback
       const mimeType = mime || meta.mime || 'audio/webm';
-      const blob = new Blob([decrypted], { type: mimeType });
+      // Strip codec params for Blob type — just use base mime
+      const blobMime = mimeType.split(';')[0].trim();
+      const blob = new Blob([decrypted], { type: blobMime });
       const url = URL.createObjectURL(blob);
-      audioUrlRef.current = url;
-      setAudioUrl(url);
+      blobUrlRef.current = url;
+
+      // 4. Set src on audio element directly via ref, wait for canplay
+      const audio = audioRef.current;
+      if (audio) {
+        await new Promise((resolve, reject) => {
+          const onCanPlay = () => { audio.removeEventListener('canplay', onCanPlay); audio.removeEventListener('error', onError); resolve(); };
+          const onError = () => { audio.removeEventListener('canplay', onCanPlay); audio.removeEventListener('error', onError); reject(new Error('Браузер не может воспроизвести этот формат аудио')); };
+          audio.addEventListener('canplay', onCanPlay);
+          audio.addEventListener('error', onError);
+          audio.src = url;
+          audio.load();
+        });
+      }
+
+      setLoaded(true);
       return url;
     } catch (err) {
       console.error('Voice load error:', err);
@@ -64,7 +83,7 @@ export default function VoiceMessage({ fileId, mime, duration, cryptoKey, roomId
     } finally {
       setIsLoading(false);
     }
-  }, [audioUrl, cryptoKey, fileId, mime, roomId]);
+  }, [loaded, isLoading, cryptoKey, fileId, mime, roomId]);
 
   const handlePlayPause = useCallback(async () => {
     const audio = audioRef.current;
@@ -76,13 +95,10 @@ export default function VoiceMessage({ fileId, mime, duration, cryptoKey, roomId
       return;
     }
 
-    // Load first if needed
-    const url = audioUrl || await loadAudio();
-    if (!url) return;
-
-    // If url was just set, audio.src may not be set yet — set it now
-    if (audio.src !== url) {
-      audio.src = url;
+    // Load if not yet loaded
+    if (!loaded) {
+      const url = await loadAudio();
+      if (!url) return;
     }
 
     try {
@@ -90,21 +106,20 @@ export default function VoiceMessage({ fileId, mime, duration, cryptoKey, roomId
       setIsPlaying(true);
     } catch (err) {
       console.error('Playback error:', err);
-      setError('Ошибка воспроизведения');
+      setError('Ошибка воспроизведения: ' + err.message);
     }
-  }, [audioUrl, isPlaying, loadAudio]);
+  }, [isPlaying, loaded, loadAudio]);
 
   const handleSeek = useCallback((e) => {
     const audio = audioRef.current;
-    if (!audio || !audioUrl) return;
+    if (!audio || !loaded) return;
     const newTime = parseFloat(e.target.value);
     audio.currentTime = newTime;
     setCurrentTime(newTime);
-  }, [audioUrl]);
+  }, [loaded]);
 
   const handleTimeUpdate = () => {
-    const audio = audioRef.current;
-    if (audio) setCurrentTime(audio.currentTime);
+    if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
   };
 
   const handleLoadedMetadata = () => {
@@ -125,10 +140,9 @@ export default function VoiceMessage({ fileId, mime, duration, cryptoKey, roomId
 
   return (
     <div className="voice-message">
-      {/* Hidden audio element */}
+      {/* Hidden audio element — src set directly via ref, not via React prop */}
       <audio
         ref={audioRef}
-        src={audioUrl || undefined}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
@@ -162,11 +176,10 @@ export default function VoiceMessage({ fileId, mime, duration, cryptoKey, roomId
           <span className="voice-error">{error}</span>
         ) : (
           <>
-            {/* Waveform bars (decorative) */}
-            <div className="voice-waveform" onClick={async (e) => {
-              // Click on waveform to seek
+            {/* Waveform bars (decorative) — click to seek */}
+            <div className="voice-waveform" onClick={(e) => {
               const audio = audioRef.current;
-              if (!audio || !audioUrl) return;
+              if (!audio || !loaded) return;
               const rect = e.currentTarget.getBoundingClientRect();
               const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
               const newTime = ratio * displayDuration;
@@ -193,7 +206,7 @@ export default function VoiceMessage({ fileId, mime, duration, cryptoKey, roomId
               step={0.1}
               value={currentTime}
               onChange={handleSeek}
-              disabled={!audioUrl}
+              disabled={!loaded}
             />
           </>
         )}
@@ -201,7 +214,7 @@ export default function VoiceMessage({ fileId, mime, duration, cryptoKey, roomId
         {/* Timer */}
         <div className="voice-footer">
           <span className="voice-timer">
-            {audioUrl ? formatTime(currentTime) : formatTime(0)} / {formatTime(displayDuration)}
+            {formatTime(currentTime)} / {formatTime(displayDuration)}
           </span>
         </div>
       </div>
