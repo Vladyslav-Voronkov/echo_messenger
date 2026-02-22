@@ -395,8 +395,11 @@ export default function PdfTools({ cryptoKey, roomId, socketRef, nickname, onClo
   const sendPdf = useCallback(async (bytes, name) => {
     setSending(true);
     try {
-      const buf = bytes instanceof Uint8Array ? bytes.buffer : bytes;
-      const size = bytes instanceof Uint8Array ? bytes.length : bytes.byteLength;
+      // slice() copies exact PDF bytes from pdf-lib's pooled ArrayBuffer
+      const buf = bytes instanceof Uint8Array
+        ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+        : bytes;
+      const size = bytes instanceof Uint8Array ? bytes.byteLength : bytes.byteLength;
       const mime = 'application/pdf';
 
       // 1. Encrypt to binary blob (same as regular file upload)
