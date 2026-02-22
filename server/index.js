@@ -7,8 +7,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CHATS_DIR = path.join(__dirname, '..', 'chats');
-const ACCOUNTS_FILE = path.join(__dirname, '..', 'accounts.json');
+
+// DATA_DIR: on Railway use the mounted Volume at /app/data,
+// locally fall back to the project root (same behaviour as before).
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..');
+const CHATS_DIR = path.join(DATA_DIR, 'chats');
+const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 
 await fs.mkdir(CHATS_DIR, { recursive: true });
 
