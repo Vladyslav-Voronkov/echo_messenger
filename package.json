@@ -1,0 +1,13 @@
+{
+  "name": "legitchat",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "cd client && npm install && npm run build",
+    "start": "node server/index.js",
+    "install:all": "cd client && npm install && cd ../server && npm install"
+  }
+}

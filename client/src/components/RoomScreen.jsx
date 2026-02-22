@@ -1,0 +1,88 @@
+import { useState } from 'react';
+
+export default function RoomScreen({ account, onJoin, onLogout, isLoading, error }) {
+  const [seedPhrase, setSeedPhrase] = useState('');
+  const [showSeed, setShowSeed] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!seedPhrase.trim() || isLoading) return;
+    onJoin({ seedPhrase: seedPhrase.trim() });
+  };
+
+  return (
+    <div className="login-container">
+      <div className="login-card glass">
+
+        <div className="login-logo">
+          <span className="app-logo-text">LC</span>
+        </div>
+
+        <div className="login-header">
+          <h1 className="login-title">LEGITCHAT</h1>
+          <div className="room-account-info">
+            <span className="room-nick">👤 {account.nickname}</span>
+            <button className="link-btn" onClick={onLogout}>Сменить аккаунт</button>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="login-form">
+          <div className="field-group">
+            <label htmlFor="seedphrase">
+              Сид-фраза комнаты
+              <span className="label-hint"> — ключ доступа и шифрования</span>
+            </label>
+            <div className="seed-input-wrapper">
+              <input
+                id="seedphrase"
+                type={showSeed ? 'text' : 'password'}
+                value={seedPhrase}
+                onChange={e => setSeedPhrase(e.target.value)}
+                placeholder="Введите фразу для входа в комнату"
+                disabled={isLoading}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="toggle-seed"
+                onClick={() => setShowSeed(v => !v)}
+                tabIndex={-1}
+                aria-label="Показать/скрыть фразу"
+              >
+                {showSeed ? '🙈' : '👁️'}
+              </button>
+            </div>
+            <p className="field-hint">
+              Любой с этой же фразой может войти и читать эту комнату. Сервер видит только хэш.
+            </p>
+          </div>
+
+          {error && <p className="login-error">{error}</p>}
+
+          <button
+            type="submit"
+            className="login-btn"
+            disabled={isLoading || !seedPhrase.trim()}
+          >
+            {isLoading ? (
+              <span className="btn-loading">
+                <span className="spinner" /> Генерация ключа...
+              </span>
+            ) : (
+              'Войти в комнату'
+            )}
+          </button>
+        </form>
+
+        <div className="login-security-badges">
+          <span className="badge">AES-256-GCM</span>
+          <span className="badge">PBKDF2 · 100k итераций</span>
+          <span className="badge">Zero Knowledge</span>
+        </div>
+      </div>
+    </div>
+  );
+}

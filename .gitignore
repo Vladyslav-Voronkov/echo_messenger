@@ -1,0 +1,27 @@
+# Windows reserved device name (created accidentally, cannot be deleted on Windows)
+nul
+nul.*
+
+# Dependencies
+node_modules/
+
+# Built client
+client/dist/
+
+# Runtime data — generated on the server at runtime, should NOT be in git
+accounts.json
+accounts.json.tmp
+chats/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
