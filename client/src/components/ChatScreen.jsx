@@ -28,6 +28,8 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const loadedRef = useRef(false);
   const prevLenRef = useRef(0);
   const initialScrollDoneRef = useRef(false);
+  const messagesRef = useRef([]);
+  const sendReadRef = useRef(null);
 
   // Reset visible window and scroll flag when room changes
   useEffect(() => {
@@ -35,6 +37,9 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     prevLenRef.current = 0;
     initialScrollDoneRef.current = false;
   }, [roomId]);
+
+  // Keep messagesRef in sync so sendRead can always access latest messages
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   // Scroll to bottom: instant on first load, smooth on new messages if near bottom
   // Also send read receipt whenever new messages arrive
@@ -46,7 +51,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         // Initial history load — jump instantly to bottom (like Telegram)
         initialScrollDoneRef.current = true;
         messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
-        sendRead(); // mark all history as read
+        sendReadRef.current(); // mark all history as read
         return;
       }
       // Live messages — only auto-scroll if user is already near the bottom
@@ -57,9 +62,9 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }
       }
-      sendRead(); // mark newly received messages as read
+      sendReadRef.current(); // mark newly received messages as read
     }
-  }, [messages, sendRead]);
+  }, [messages]);
 
   const loadHistory = useCallback(async () => {
     if (loadedRef.current) return;
@@ -193,21 +198,22 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
-  // Emit 'read' to server — "I've seen all messages up to the latest one"
-  const sendRead = useCallback(async () => {
-    if (!socketRef.current?.connected || messages.length === 0) return;
+  // Always keep sendReadRef.current pointing to the latest closure
+  sendReadRef.current = async () => {
+    if (!socketRef.current?.connected || messagesRef.current.length === 0) return;
     try {
-      const upToTs = messages[messages.length - 1].ts;
+      const upToTs = messagesRef.current[messagesRef.current.length - 1].ts;
       const encNick = await encryptNick(cryptoKey, nickname);
       socketRef.current.emit('read', { roomId, nick: encNick, upToTs });
     } catch { /* ignore */ }
-  }, [cryptoKey, nickname, roomId, messages]);
+  };
 
   // Send read receipt when window regains focus
   useEffect(() => {
-    window.addEventListener('focus', sendRead);
-    return () => window.removeEventListener('focus', sendRead);
-  }, [sendRead]);
+    const handler = () => sendReadRef.current();
+    window.addEventListener('focus', handler);
+    return () => window.removeEventListener('focus', handler);
+  }, []);
 
   const statusInfo = {
     connecting: { label: 'Подключение...', cls: 'status-connecting' },
