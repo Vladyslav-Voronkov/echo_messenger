@@ -246,9 +246,11 @@ function SplitPanel({ onSend, onClose }) {
       const buf = await f.arrayBuffer();
       const doc = await PDFDocument.load(buf);
       const total = doc.getPageCount();
-      const u8 = new Uint8Array(buf);
+      // slice() creates an independent copy — pdfjs detaches the original ArrayBuffer
+      // when rendering thumbnails, so we must keep a separate copy for pdf-lib split/merge
+      const u8 = new Uint8Array(buf.slice(0));
       setPdfInfo({ buf: u8, total });
-      const t = await renderPdfThumb(u8, 0);
+      const t = await renderPdfThumb(u8.slice(0), 0);
       setThumb(t);
     } catch {
       setError('Не удалось прочитать PDF');
