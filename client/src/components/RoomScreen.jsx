@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import WalletPanel from './WalletPanel.jsx';
+import BuildBadge from './BuildBadge.jsx';
 
 export default function RoomScreen({ account, onJoin, onLogout, isLoading, error }) {
   const [seedPhrase, setSeedPhrase] = useState('');
@@ -82,6 +84,9 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
           <span className="badge">PBKDF2 · 100k итераций</span>
           <span className="badge">Zero Knowledge</span>
         </div>
+
+        <WalletPanel mode="full" />
+        <BuildBadge />
       </div>
     </div>
   );

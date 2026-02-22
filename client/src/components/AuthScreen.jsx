@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import BuildBadge from './BuildBadge.jsx';
 
 /**
  * AuthScreen — Register or Login with nickname + password.
@@ -199,6 +200,8 @@ export default function AuthScreen({ onAuth }) {
           <span className="badge">AES-256-GCM</span>
           <span className="badge">Zero Knowledge</span>
         </div>
+
+        <BuildBadge />
       </div>
     </div>
   );

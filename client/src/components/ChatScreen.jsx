@@ -4,6 +4,8 @@ import Message from './Message.jsx';
 import MessageInput from './MessageInput.jsx';
 import PinnedBanner from './PinnedBanner.jsx';
 import MediaPanel from './MediaPanel.jsx';
+import WalletPanel from './WalletPanel.jsx';
+import BuildBadge from './BuildBadge.jsx';
 import { encryptMessage, encryptNick, decryptNick, decryptMessageObject } from '../utils/crypto.js';
 import { getNickColor } from '../utils/nickColor.js';
 
@@ -513,6 +515,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
             </div>
             <span>{nickname}</span>
           </div>
+          <WalletPanel mode="compact" />
           <button className="leave-btn" onClick={onLeaveRoom} title="Сменить чат">
             <IconChevronLeft />
             <span>Чаты</span>
@@ -608,6 +611,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           roomId={roomId}
           socketRef={socketRef}
         />
+        <BuildBadge />
       </footer>
     </div>
   );

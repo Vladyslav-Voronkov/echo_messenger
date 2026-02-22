@@ -1,8 +1,19 @@
-// build: 2026-02-22T00:00:00Z
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { execSync } from 'child_process';
+
+function getBuildInfo() {
+  try {
+    const sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    const date = new Date().toISOString().slice(0, 10);
+    return `${sha} · ${date}`;
+  } catch { return 'dev'; }
+}
 
 export default defineConfig({
+  define: {
+    __BUILD__: JSON.stringify(getBuildInfo()),
+  },
   plugins: [react()],
   server: {
     port: 5173,
