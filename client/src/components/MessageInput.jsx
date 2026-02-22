@@ -11,6 +11,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [showPdfTools, setShowPdfTools] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [imgLoading, setImgLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null); // null | { pct: 0-100, label: string }
   const textareaRef = useRef(null);
@@ -29,6 +30,14 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
   }, [text]);
+
+  // Close attach menu when clicking outside
+  useEffect(() => {
+    if (!showAttachMenu) return;
+    const close = () => setShowAttachMenu(false);
+    document.addEventListener('click', close, { capture: true, once: true });
+    return () => document.removeEventListener('click', close, { capture: true });
+  }, [showAttachMenu]);
 
   // Notify parent that user started/stopped typing (debounced)
   const notifyTyping = useCallback(() => {
@@ -241,9 +250,10 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
       )}
 
       <div className="input-wrapper">
+        {/* ── Desktop: all buttons visible ── */}
         <button
           type="button"
-          className={emojiCls}
+          className={emojiCls + ' desktop-only'}
           onClick={() => setShowEmoji(v => !v)}
           disabled={disabled}
           title="Эмодзи"
@@ -251,7 +261,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
 
         <button
           type="button"
-          className="img-upload-btn"
+          className="img-upload-btn desktop-only"
           onClick={() => imageInputRef.current?.click()}
           disabled={disabled || imgLoading}
           title="Отправить фото"
@@ -261,7 +271,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
 
         <button
           type="button"
-          className="img-upload-btn"
+          className="img-upload-btn desktop-only"
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled || imgLoading}
           title="Отправить файл"
@@ -269,11 +279,41 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
 
         <button
           type="button"
-          className="img-upload-btn"
+          className="img-upload-btn desktop-only"
           onClick={() => setShowPdfTools(v => !v)}
           disabled={disabled || imgLoading}
           title="PDF инструменты (объединить / разбить)"
         >📄</button>
+
+        {/* ── Mobile: single attach button with popup menu ── */}
+        <div className="attach-menu-wrap mobile-only">
+          <button
+            type="button"
+            className={'img-upload-btn' + (showAttachMenu ? ' active' : '')}
+            onClick={(e) => { e.stopPropagation(); setShowAttachMenu(v => !v); }}
+            disabled={disabled || imgLoading}
+            title="Вложения"
+          >
+            {imgLoading ? <span className="spinner" style={{width:'16px',height:'16px'}} /> : '📎'}
+          </button>
+
+          {showAttachMenu && (
+            <div className="attach-menu" onClick={e => e.stopPropagation()}>
+              <button className="attach-menu-item" onClick={() => { setShowEmoji(v => !v); setShowAttachMenu(false); }}>
+                <span>😊</span> Эмодзи
+              </button>
+              <button className="attach-menu-item" onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }}>
+                <span>🖼️</span> Фото
+              </button>
+              <button className="attach-menu-item" onClick={() => { fileInputRef.current?.click(); setShowAttachMenu(false); }}>
+                <span>📁</span> Файл
+              </button>
+              <button className="attach-menu-item" onClick={() => { setShowPdfTools(v => !v); setShowAttachMenu(false); }}>
+                <span>📄</span> PDF инструменты
+              </button>
+            </div>
+          )}
+        </div>
 
         <input
           ref={imageInputRef}

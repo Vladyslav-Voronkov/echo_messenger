@@ -25,18 +25,27 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const messagesAreaRef = useRef(null);
   const loadedRef = useRef(false);
   const prevLenRef = useRef(0);
+  const initialScrollDoneRef = useRef(false);
 
-  // Reset visible window when room changes
+  // Reset visible window and scroll flag when room changes
   useEffect(() => {
     setVisibleCount(BATCH);
     prevLenRef.current = 0;
+    initialScrollDoneRef.current = false;
   }, [roomId]);
 
-  // Auto-scroll to bottom only when a new message arrives and user is near the bottom
+  // Scroll to bottom: instant on first load, smooth on new messages if near bottom
   useEffect(() => {
     const added = messages.length - prevLenRef.current;
     prevLenRef.current = messages.length;
     if (added > 0) {
+      if (!initialScrollDoneRef.current) {
+        // Initial history load — jump instantly to bottom (like Telegram)
+        initialScrollDoneRef.current = true;
+        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+        return;
+      }
+      // Live messages — only auto-scroll if user is already near the bottom
       const area = messagesAreaRef.current;
       if (area) {
         const distFromBottom = area.scrollHeight - area.scrollTop - area.clientHeight;
@@ -65,10 +74,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         })
       );
       setMessages(decrypted.filter(Boolean));
-      // Instantly jump to the bottom after history loads (like Telegram)
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
-      });
+      // Scroll handled by useEffect on messages change (initialScrollDoneRef)
     } catch (err) { console.error('History load error:', err); }
   }, [roomId, cryptoKey, nickname]);
 

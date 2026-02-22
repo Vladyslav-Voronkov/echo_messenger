@@ -648,10 +648,68 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
+/*  DESKTOP / MOBILE VISIBILITY UTILITIES                                       */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Desktop: show normally; Mobile: hidden via media query below */
+.desktop-only { display: flex; }
+.mobile-only  { display: none; }
+
+/* ── Mobile attach menu popup ────────────────────────────────────────────── */
+.attach-menu-wrap {
+  position: relative;
+}
+
+.attach-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  background: rgba(22, 22, 38, 0.97);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+  z-index: 200;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  backdrop-filter: blur(16px);
+}
+
+.attach-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 0.15s;
+}
+.attach-menu-item:hover, .attach-menu-item:active {
+  background: rgba(255,255,255,0.09);
+}
+.attach-menu-item span {
+  font-size: 20px;
+  width: 26px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
 /*  RESPONSIVE — Mobile                                                        */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
 @media (max-width: 600px) {
+  /* Show mobile-only, hide desktop-only */
+  .desktop-only { display: none !important; }
+  .mobile-only  { display: flex; }
   /* Login */
   .login-card {
     padding: 32px 20px 28px;
