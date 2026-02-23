@@ -3808,3 +3808,67 @@ body {
   user-select: none;
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/*  v0.2.0 — SCROLL DATE LABEL                                                 */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.scroll-date-label {
+  position: absolute;
+  top: 68px; /* below header + pinned banner area */
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 24, 36, 0.78);
+  backdrop-filter: blur(10px) saturate(1.4);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  letter-spacing: 0.2px;
+}
+
+.scroll-date-label--visible {
+  opacity: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/*  v0.2.0 — UNREAD BADGE ON SCROLL-TO-BOTTOM BUTTON                          */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.scroll-to-bottom-btn {
+  position: relative; /* needed for absolute badge positioning */
+}
+
+.scroll-unread-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.55);
+  pointer-events: none;
+  animation: badge-pop 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes badge-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}

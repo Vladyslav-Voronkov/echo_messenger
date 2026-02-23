@@ -98,6 +98,7 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
     <div
       className={rowCls}
       data-msg-id={message.id}
+      data-ts={ts}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >

@@ -90,6 +90,11 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const [activePinIdx, setActivePinIdx] = useState(0);
   const [showMediaPanel, setShowMediaPanel] = useState(false);
   const [suspiciousActivity, setSuspiciousActivity] = useState(false);
+  // v0.2.0: scroll date label
+  const [scrollDateLabel, setScrollDateLabel] = useState('');
+  const [showScrollDate, setShowScrollDate] = useState(false);
+  // v0.2.0: unread counter on scroll button
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -103,6 +108,10 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const pingIntervalRef = useRef(null);
   // Rolling window for suspicious activity detection
   const activityLogRef = useRef([]); // timestamps of join/leave events
+  // v0.2.0: timer for hiding scroll date label
+  const scrollDateTimerRef = useRef(null);
+  // v0.2.0: keep showScrollBtn accessible in socket callback without stale closure
+  const showScrollBtnRef = useRef(false);
 
   // Nick color for own avatar in header
   const ownNickColor = getNickColor(nickname);
@@ -144,6 +153,16 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     setActivePinIdx(prev => (pins.length === 0 ? 0 : Math.min(prev, pins.length - 1)));
   }, [pins]);
 
+  // v0.2.0: keep ref in sync so socket message handler reads current value
+  useEffect(() => { showScrollBtnRef.current = showScrollBtn; }, [showScrollBtn]);
+
+  // v0.2.0: request browser push notification permission once on mount
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
   // Track join/leave events for suspicious activity detection
   const recordActivityEvent = useCallback(() => {
     const now = Date.now();
@@ -160,6 +179,31 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         }
       }, 30000);
     }
+  }, []);
+
+  // v0.2.0: play notification sound
+  const playNotifSound = useCallback(() => {
+    try {
+      const audio = new Audio('/notification.wav');
+      audio.volume = 0.5;
+      audio.play().catch(() => {});
+    } catch { /* ignore */ }
+  }, []);
+
+  // v0.2.0: show browser push notification
+  const showBrowserNotif = useCallback((plainNick, text) => {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (!document.hidden) return;
+    try {
+      const body = text && text.length > 100 ? text.slice(0, 100) + '...' : (text || '');
+      const n = new Notification(plainNick, {
+        body,
+        icon: '/favicon.svg',
+        tag: 'echo-message',
+        silent: true, // we handle sound ourselves
+      });
+      n.onclick = () => { window.focus(); n.close(); };
+    } catch { /* ignore */ }
   }, []);
 
   const loadHistory = useCallback(async () => {
@@ -235,10 +279,31 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         s.delete(msg.nick);
         return s;
       });
+      const isOwn = msg.nick === nickname;
       setMessages(prev => [
         ...prev,
-        { ...msg, id: 'live-' + Date.now() + '-' + Math.random(), isOwn: msg.nick === nickname },
+        { ...msg, id: 'live-' + Date.now() + '-' + Math.random(), isOwn },
       ]);
+      // v0.2.0: sound + push notif + unread counter for messages from others
+      if (!isOwn) {
+        if (document.hidden || showScrollBtnRef.current) {
+          playNotifSound();
+        }
+        // Build a display text for the notification body
+        let notifText = msg.text || '';
+        try {
+          const parsed = JSON.parse(notifText);
+          if (parsed.type === 'image') notifText = '📷 Фотография';
+          else if (parsed.type === 'file') notifText = '📎 ' + (parsed.file?.name || 'Файл');
+          else if (parsed.type === 'voice') notifText = '🎤 Голосовое сообщение';
+          else if (typeof parsed.text === 'string') notifText = parsed.text;
+        } catch { /* plain text */ }
+        showBrowserNotif(msg.nick, notifText);
+        // Increment unread counter when user is not at bottom
+        if (showScrollBtnRef.current) {
+          setUnreadCount(prev => prev + 1);
+        }
+      }
     });
 
     socket.on('typing', async ({ nick: encNick }) => {
@@ -344,6 +409,26 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     }
   }, []);
 
+  // v0.2.0: format a timestamp into a Russian date label
+  const formatScrollDate = useCallback((ts) => {
+    const msgDate = new Date(ts);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const isSameDay = (a, b) =>
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate();
+    if (isSameDay(msgDate, today)) return 'Сегодня';
+    if (isSameDay(msgDate, yesterday)) return 'Вчера';
+    const months = ['января','февраля','марта','апреля','мая','июня',
+                    'июля','августа','сентября','октября','ноября','декабря'];
+    const day = msgDate.getDate();
+    const month = months[msgDate.getMonth()];
+    if (msgDate.getFullYear() === today.getFullYear()) return `${day} ${month}`;
+    return `${day} ${month} ${msgDate.getFullYear()}`;
+  }, []);
+
   const handleScroll = useCallback((e) => {
     const el = e.currentTarget;
     if (el.scrollTop < 80 && visibleCount < messages.length) {
@@ -355,10 +440,35 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     }
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     setShowScrollBtn(distFromBottom > 200);
-  }, [visibleCount, messages.length]);
+
+    // v0.2.0: reset unread count when scrolled to bottom
+    if (distFromBottom < 50) {
+      setUnreadCount(0);
+    }
+
+    // v0.2.0: floating date label — find the topmost visible message
+    const area = el;
+    const areaTop = area.getBoundingClientRect().top;
+    const msgEls = area.querySelectorAll('[data-ts]');
+    let topTs = null;
+    for (const msgEl of msgEls) {
+      const rect = msgEl.getBoundingClientRect();
+      if (rect.bottom > areaTop + 4) {
+        topTs = parseInt(msgEl.getAttribute('data-ts'), 10);
+        break;
+      }
+    }
+    if (topTs) {
+      setScrollDateLabel(formatScrollDate(topTs));
+      setShowScrollDate(true);
+      if (scrollDateTimerRef.current) clearTimeout(scrollDateTimerRef.current);
+      scrollDateTimerRef.current = setTimeout(() => setShowScrollDate(false), 1500);
+    }
+  }, [visibleCount, messages.length, formatScrollDate]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setUnreadCount(0);
   }, []);
 
   likesRef.current = likes;
@@ -512,6 +622,11 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         />
       )}
 
+      {/* v0.2.0: floating scroll date label */}
+      <div className={'scroll-date-label' + (showScrollDate ? ' scroll-date-label--visible' : '')}>
+        {scrollDateLabel}
+      </div>
+
       <main className="messages-area" ref={messagesAreaRef} onScroll={handleScroll}>
         {messages.length === 0 && status === 'online' && (
           <div className="empty-state">
@@ -559,6 +674,11 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       {showScrollBtn && (
         <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="В конец">
           <IconArrowDown />
+          {unreadCount > 0 && (
+            <span className="scroll-unread-badge">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
         </button>
       )}
 
