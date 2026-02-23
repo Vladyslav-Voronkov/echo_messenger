@@ -439,17 +439,6 @@ io.on('connection', (socket) => {
       // Actually we need to check BEFORE adding: if nick already had sockets, don't re-announce
     }
 
-    // Announce join only if this nick had no other sockets before this one joined
-    const socketsForNick = roomMembers.get(roomId)?.get(nick);
-    const isFirstSocket = socketsForNick && socketsForNick.size === 1; // we already added this one
-
-    if (nick && isFirstSocket) {
-      const joinEvent = { type: 'system', subtype: 'join', nick, ts: Date.now() };
-      const filePath = path.join(CHATS_DIR, `${roomId}.txt`);
-      await fs.appendFile(filePath, JSON.stringify(joinEvent) + '\n', 'utf8').catch(() => {});
-      socket.to(roomId).emit('user_joined', { nick });
-    }
-
     // Send current pins to newly joined socket
     const pins = [...(roomPins.get(roomId)?.values() ?? [])].sort((a, b) => a.ts - b.ts);
     if (pins.length > 0) socket.emit('pins_updated', { pins });
@@ -595,14 +584,7 @@ io.on('connection', (socket) => {
     const count = getRoomCount(roomId);
     io.to(roomId).emit('online_count', { count });
 
-    // Only announce leave + persist if this was the LAST socket for this nick
-    const stillHasSockets = (roomMembers.get(roomId)?.get(encNick)?.size ?? 0) > 0;
-    if (encNick && !stillHasSockets) {
-      socket.to(roomId).emit('user_left', { nick: encNick });
-      const leaveEvent = { type: 'system', subtype: 'leave', nick: encNick, ts: Date.now() };
-      const filePath = path.join(CHATS_DIR, `${roomId}.txt`);
-      await fs.appendFile(filePath, JSON.stringify(leaveEvent) + '\n', 'utf8').catch(() => {});
-    }
+    // (join/leave notifications intentionally disabled)
   });
 });
 

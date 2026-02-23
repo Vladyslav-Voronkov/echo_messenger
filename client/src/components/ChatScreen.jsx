@@ -178,9 +178,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
               try {
                 const plainNick = await decryptNick(cryptoKey, obj.nick);
                 let text = '';
-                if (obj.subtype === 'join') text = `${plainNick} присоединился(-ась)`;
-                else if (obj.subtype === 'leave') text = `${plainNick} покинул(а) чат`;
-                else if (obj.subtype === 'pin') text = `${plainNick} закрепил(а) сообщение`;
+                if (obj.subtype === 'pin') text = `${plainNick} закрепил(а) сообщение`;
                 else if (obj.subtype === 'unpin') text = `${plainNick} открепил(а) сообщение`;
                 if (text) return { id: 'hist-sys-' + i, type: 'system', text, ts: obj.ts };
               } catch { return null; }
@@ -297,29 +295,6 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           ]);
         } catch { /* ignore */ }
       }
-    });
-
-    socket.on('user_joined', async ({ nick: encNick }) => {
-      try {
-        const plainNick = await decryptNick(cryptoKey, encNick);
-        if (plainNick === nickname) return;
-        recordActivityEvent();
-        setMessages(prev => [
-          ...prev,
-          { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text: `${plainNick} присоединился(-ась)`, ts: Date.now() },
-        ]);
-      } catch { /* ignore */ }
-    });
-
-    socket.on('user_left', async ({ nick: encNick }) => {
-      try {
-        const plainNick = await decryptNick(cryptoKey, encNick);
-        recordActivityEvent();
-        setMessages(prev => [
-          ...prev,
-          { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text: `${plainNick} покинул(а) чат`, ts: Date.now() },
-        ]);
-      } catch { /* ignore */ }
     });
 
     // Page Visibility API — send set_active when tab is hidden/shown
