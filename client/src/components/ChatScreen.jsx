@@ -184,7 +184,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   // v0.2.0: play notification sound
   const playNotifSound = useCallback(() => {
     try {
-      const audio = new Audio('/notification.wav');
+      const audio = new Audio('/notification.mp3');
       audio.volume = 0.5;
       audio.play().catch(() => {});
     } catch { /* ignore */ }
