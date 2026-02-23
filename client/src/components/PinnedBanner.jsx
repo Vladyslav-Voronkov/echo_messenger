@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useTranslation } from '../utils/i18n.js';
+import { useTranslation } from '../utils/i18n.jsx';
 
 /* ── SVG icons ── */
 const IconPin = () => (

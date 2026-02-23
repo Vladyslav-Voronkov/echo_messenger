@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import EmojiPicker from './EmojiPicker.jsx';
 import PdfTools from './PdfTools.jsx';
 import { encryptNick, encryptMessage, encryptFileToBinary } from '../utils/crypto.js';
-import { useTranslation, interpolate } from '../utils/i18n.js';
+import { useTranslation, interpolate } from '../utils/i18n.jsx';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024;

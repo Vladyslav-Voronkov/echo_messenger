@@ -8,7 +8,7 @@ import WalletPanel from './WalletPanel.jsx';
 import BuildBadge from './BuildBadge.jsx';
 import { encryptMessage, encryptNick, decryptNick, decryptMessageObject } from '../utils/crypto.js';
 import { getNickColor } from '../utils/nickColor.js';
-import { useTranslation, interpolate, LanguageSwitcher } from '../utils/i18n.js';
+import { useTranslation, interpolate, LanguageSwitcher } from '../utils/i18n.jsx';
 
 // In dev: Vite proxies /socket.io → localhost:3001 automatically.
 // In production: server serves the built client, so same origin = correct.

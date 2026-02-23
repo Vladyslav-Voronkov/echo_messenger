@@ -3,7 +3,7 @@ import ImageMessage from './ImageMessage.jsx';
 import FileMessage from './FileMessage.jsx';
 import VoiceMessage from './VoiceMessage.jsx';
 import { getNickColor } from '../utils/nickColor.js';
-import { useTranslation, LOCALE_MAP } from '../utils/i18n.js';
+import { useTranslation, LOCALE_MAP } from '../utils/i18n.jsx';
 
 function parseMessage(raw) {
   try {

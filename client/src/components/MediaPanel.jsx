@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useTranslation, LOCALE_MAP } from '../utils/i18n.js';
+import { useTranslation, LOCALE_MAP } from '../utils/i18n.jsx';
 
 /* ── SVG icons ── */
 const IconImage = () => (

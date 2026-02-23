@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import WalletPanel from './WalletPanel.jsx';
 import BuildBadge from './BuildBadge.jsx';
-import { useTranslation, LanguageSwitcher } from '../utils/i18n.js';
+import { useTranslation, LanguageSwitcher } from '../utils/i18n.jsx';
 
 export default function RoomScreen({ account, onJoin, onLogout, isLoading, error }) {
   const { t } = useTranslation();

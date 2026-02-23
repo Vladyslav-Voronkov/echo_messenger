@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import BuildBadge from './BuildBadge.jsx';
-import { useTranslation, LanguageSwitcher } from '../utils/i18n.js';
+import { useTranslation, LanguageSwitcher } from '../utils/i18n.jsx';
 
 /**
  * AuthScreen — Register or Login with nickname + password.

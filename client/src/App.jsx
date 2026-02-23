@@ -3,7 +3,7 @@ import AuthScreen from './components/AuthScreen.jsx';
 import RoomScreen from './components/RoomScreen.jsx';
 import ChatScreen from './components/ChatScreen.jsx';
 import { deriveRoomId, deriveKey } from './utils/crypto.js';
-import { LangProvider, useTranslation } from './utils/i18n.js';
+import { LangProvider, useTranslation } from './utils/i18n.jsx';
 
 const SESSION_KEY = 'echo_session';
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
