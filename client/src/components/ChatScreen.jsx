@@ -241,9 +241,10 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
 
   useEffect(() => {
     const socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnectionDelay: 1000,
       reconnectionAttempts: Infinity,
+      upgrade: true,
     });
     socketRef.current = socket;
 
