@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import EmojiPicker from './EmojiPicker.jsx';
 import PdfTools from './PdfTools.jsx';
 import { encryptNick, encryptMessage, encryptFileToBinary } from '../utils/crypto.js';
+import { useTranslation, interpolate } from '../utils/i18n.js';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024;
@@ -14,6 +15,7 @@ function formatRecTime(secs) {
 }
 
 export default function MessageInput({ onSend, onTyping, disabled, nickname, replyTo, onCancelReply, cryptoKey, roomId, socketRef }) {
+  const { t } = useTranslation();
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [showPdfTools, setShowPdfTools] = useState(false);
@@ -112,21 +114,21 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
-    if (!file.type.startsWith('image/')) { alert('Только изображения (JPG, PNG, GIF, WebP)'); return; }
-    if (file.size > MAX_IMAGE_SIZE) { alert('Максимальный размер фото: 5MB'); return; }
+    if (!file.type.startsWith('image/')) { alert(t('input.err_img_type')); return; }
+    if (file.size > MAX_IMAGE_SIZE) { alert(t('input.err_img_size')); return; }
 
     setImgLoading(true);
-    setUploadProgress({ pct: 0, label: 'Чтение файла...' });
+    setUploadProgress({ pct: 0, label: t('input.progress_reading') });
     try {
       const arrayBuffer = await file.arrayBuffer();
 
       // Encrypt to binary blob (same approach as regular files)
-      setUploadProgress({ pct: 5, label: 'Шифрование...' });
+      setUploadProgress({ pct: 5, label: t('input.progress_encrypting') });
       const { iv, blob: encBlob } = await encryptFileToBinary(cryptoKey, arrayBuffer);
       const encNick = await encryptNick(cryptoKey, nickname);
 
       // Upload via XHR with progress
-      setUploadProgress({ pct: 10, label: 'Загрузка 0%...' });
+      setUploadProgress({ pct: 10, label: interpolate(t('input.progress_uploading'), { pct: 0 }) });
       const formData = new FormData();
       formData.append('file', encBlob, 'encrypted.bin');
       const meta = JSON.stringify({
@@ -141,7 +143,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
         xhr.upload.onprogress = (ev) => {
           if (ev.lengthComputable) {
             const pct = Math.round(10 + (ev.loaded / ev.total) * 88);
-            setUploadProgress({ pct, label: 'Загрузка ' + Math.round((ev.loaded / ev.total) * 100) + '%...' });
+            setUploadProgress({ pct, label: interpolate(t('input.progress_uploading'), { pct: Math.round((ev.loaded / ev.total) * 100) }) });
           }
         };
         xhr.onload = () => {
@@ -155,43 +157,43 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
       });
 
       // Send small socket message referencing the uploaded image
-      setUploadProgress({ pct: 99, label: 'Отправка...' });
+      setUploadProgress({ pct: 99, label: t('input.progress_sending') });
       const payload = JSON.stringify({ type: 'image', image: { fileId, mime: file.type, size: file.size } });
       const { iv: msgIv, data: msgData } = await encryptMessage(cryptoKey, payload);
       socketRef.current.emit('message', {
         roomId,
         encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick },
       });
-      setUploadProgress({ pct: 100, label: 'Готово!' });
+      setUploadProgress({ pct: 100, label: t('input.progress_done') });
       setTimeout(() => setUploadProgress(null), 800);
     } catch (err) {
       console.error('Image send error:', err);
       setUploadProgress(null);
-      alert('Ошибка отправки изображения: ' + err.message);
+      alert(t('input.err_img_send') + err.message);
     } finally {
       setImgLoading(false);
     }
-  }, [cryptoKey, nickname, roomId, socketRef]);
+  }, [cryptoKey, nickname, roomId, socketRef, t]);
 
   const handleFileSelect = useCallback(async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
-    if (file.size > MAX_FILE_SIZE) { alert('Максимальный размер файла: 1GB'); return; }
+    if (file.size > MAX_FILE_SIZE) { alert(t('input.err_file_size')); return; }
 
     setImgLoading(true);
-    setUploadProgress({ pct: 0, label: 'Чтение файла...' });
+    setUploadProgress({ pct: 0, label: t('input.progress_reading') });
     try {
       // 1. Read file into memory
       const arrayBuffer = await file.arrayBuffer();
 
       // 2. Encrypt to binary blob (no base64 — stays binary, 1.33x less memory)
-      setUploadProgress({ pct: 5, label: 'Шифрование...' });
+      setUploadProgress({ pct: 5, label: t('input.progress_encrypting') });
       const { iv, blob: encBlob } = await encryptFileToBinary(cryptoKey, arrayBuffer);
       const encNick = await encryptNick(cryptoKey, nickname);
 
       // 3. Upload via XHR so we get progress events
-      setUploadProgress({ pct: 10, label: 'Загрузка 0%...' });
+      setUploadProgress({ pct: 10, label: interpolate(t('input.progress_uploading'), { pct: 0 }) });
       const formData = new FormData();
       formData.append('file', encBlob, 'encrypted.bin');
 
@@ -211,7 +213,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
         xhr.upload.onprogress = (ev) => {
           if (ev.lengthComputable) {
             const pct = Math.round(10 + (ev.loaded / ev.total) * 88);
-            setUploadProgress({ pct, label: 'Загрузка ' + Math.round((ev.loaded / ev.total) * 100) + '%...' });
+            setUploadProgress({ pct, label: interpolate(t('input.progress_uploading'), { pct: Math.round((ev.loaded / ev.total) * 100) }) });
           }
         };
         xhr.onload = () => {
@@ -227,7 +229,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
       });
 
       // 4. Send a small socket message referencing the uploaded file
-      setUploadProgress({ pct: 99, label: 'Отправка...' });
+      setUploadProgress({ pct: 99, label: t('input.progress_sending') });
       const payload = JSON.stringify({
         type: 'file',
         file: { fileId, name: file.name, mime: file.type || 'application/octet-stream', size: file.size },
@@ -237,16 +239,16 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
         roomId,
         encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick },
       });
-      setUploadProgress({ pct: 100, label: 'Готово!' });
+      setUploadProgress({ pct: 100, label: t('input.progress_done') });
       setTimeout(() => setUploadProgress(null), 800);
     } catch (err) {
       console.error('File send error:', err);
       setUploadProgress(null);
-      alert('Ошибка отправки файла: ' + err.message);
+      alert(t('input.err_file_send') + err.message);
     } finally {
       setImgLoading(false);
     }
-  }, [cryptoKey, nickname, roomId, socketRef]);
+  }, [cryptoKey, nickname, roomId, socketRef, t]);
 
   // ── Voice recording ───────────────────────────────────────────────────────
 
@@ -268,7 +270,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      alert('Нет доступа к микрофону');
+      alert(t('input.err_mic'));
       return;
     }
     micStreamRef.current = stream;
@@ -334,13 +336,13 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
       const audioBlob = new Blob(chunks, { type: mimeType });
 
       setImgLoading(true);
-      setUploadProgress({ pct: 0, label: 'Шифрование аудио...' });
+      setUploadProgress({ pct: 0, label: t('input.progress_enc_audio') });
       try {
         const arrayBuffer = await audioBlob.arrayBuffer();
         const { iv, blob: encBlob } = await encryptFileToBinary(cryptoKey, arrayBuffer);
         const encNick = await encryptNick(cryptoKey, nickname);
 
-        setUploadProgress({ pct: 10, label: 'Загрузка...' });
+        setUploadProgress({ pct: 10, label: interpolate(t('input.progress_uploading'), { pct: 0 }) });
         const formData = new FormData();
         formData.append('file', encBlob, 'voice.bin');
         const meta = JSON.stringify({
@@ -355,7 +357,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
           xhr.upload.onprogress = (ev) => {
             if (ev.lengthComputable) {
               const pct = Math.round(10 + (ev.loaded / ev.total) * 88);
-              setUploadProgress({ pct, label: 'Загрузка ' + Math.round((ev.loaded / ev.total) * 100) + '%...' });
+              setUploadProgress({ pct, label: interpolate(t('input.progress_uploading'), { pct: Math.round((ev.loaded / ev.total) * 100) }) });
             }
           };
           xhr.onload = () => {
@@ -368,7 +370,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
           xhr.send(formData);
         });
 
-        setUploadProgress({ pct: 99, label: 'Отправка...' });
+        setUploadProgress({ pct: 99, label: t('input.progress_sending') });
         const payload = JSON.stringify({
           type: 'voice',
           voice: { fileId, mime: mimeType, duration: Math.max(1, duration) },
@@ -378,12 +380,12 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
           roomId,
           encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick },
         });
-        setUploadProgress({ pct: 100, label: 'Готово!' });
+        setUploadProgress({ pct: 100, label: t('input.progress_done') });
         setTimeout(() => setUploadProgress(null), 800);
       } catch (err) {
         console.error('Voice send error:', err);
         setUploadProgress(null);
-        alert('Ошибка отправки голосового: ' + err.message);
+        alert(t('input.err_voice_send') + err.message);
       } finally {
         setImgLoading(false);
       }
@@ -406,10 +408,10 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
     }
   }, [isRecording, handleMicPointerUp]);
 
-  const placeholder = disabled ? 'Переподключение...'
-    : imgLoading ? 'Шифрование...'
-    : replyTo ? 'Ответ на сообщение...'
-    : 'Написать сообщение...';
+  const placeholder = disabled ? t('input.placeholder_reconnecting')
+    : imgLoading ? t('input.placeholder_encrypting')
+    : replyTo ? t('input.placeholder_reply')
+    : t('input.placeholder_default');
 
   const showSendBtn = !!text.trim();
 
@@ -419,7 +421,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
       {replyTo && (
         <div className="reply-preview">
           <div className="reply-preview-content">
-            <span className="reply-preview-label">↩ Ответ</span>
+            <span className="reply-preview-label">{t('input.reply_label')}</span>
             <span className="reply-preview-nick">{replyTo.nick}</span>
             <span className="reply-preview-text">
               {(replyTo.text?.length ?? 0) > 60 ? replyTo.text.slice(0, 60) + '...' : (replyTo.text || '')}
@@ -435,7 +437,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
           <span className="recording-dot" />
           <span className="recording-time">{formatRecTime(recordingTime)}</span>
           <span className="recording-cancel-hint">
-            {cancelRecord ? '🗑 Отпустите для отмены' : '↑ Потяните вверх для отмены'}
+            {cancelRecord ? '🗑 ' + t('input.cancel_record') : t('input.drag_cancel')}
           </span>
         </div>
       )}
@@ -456,7 +458,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
                 className={'input-icon-btn' + (showAttachMenu ? ' active' : '')}
                 onClick={() => setShowAttachMenu(v => !v)}
                 disabled={disabled || imgLoading}
-                title="Вложения"
+                title={t('input.title_attach')}
               >
                 {imgLoading
                   ? <span className="spinner" style={{width:'15px',height:'15px'}} />
@@ -468,15 +470,15 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
                 <div className="attach-menu">
                   <button className="attach-menu-item" onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                    Фото / видео
+                    {t('input.attach_photo')}
                   </button>
                   <button className="attach-menu-item" onClick={() => { fileInputRef.current?.click(); setShowAttachMenu(false); }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
-                    Файл
+                    {t('input.attach_file')}
                   </button>
                   <button className="attach-menu-item" onClick={() => { setShowPdfTools(v => !v); setShowAttachMenu(false); }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                    PDF инструменты
+                    {t('input.attach_pdf')}
                   </button>
                 </div>
               )}
@@ -488,7 +490,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
               className={'input-icon-btn' + (showEmoji ? ' active' : '')}
               onClick={() => setShowEmoji(v => !v)}
               disabled={disabled}
-              title="Эмодзи"
+              title={t('input.title_emoji')}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
             </button>
@@ -513,7 +515,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
             className="send-btn"
             onClick={handleSend}
             disabled={disabled || !text.trim() || imgLoading}
-            aria-label="Отправить"
+            aria-label={t('input.aria_send')}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
@@ -528,8 +530,8 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
             onPointerLeave={handleMicPointerLeave}
             onPointerCancel={handleMicPointerUp}
             disabled={disabled || imgLoading}
-            aria-label={isRecording ? 'Остановить запись' : 'Записать голосовое'}
-            title={isRecording ? 'Отпустите для отправки' : 'Удерживайте для записи'}
+            aria-label={isRecording ? t('input.aria_mic_stop') : t('input.aria_mic_start')}
+            title={isRecording ? t('input.title_mic_release') : t('input.title_mic_hold')}
           >
             {isRecording
               ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>

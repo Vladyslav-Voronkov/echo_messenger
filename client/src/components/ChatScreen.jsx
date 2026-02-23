@@ -8,6 +8,7 @@ import WalletPanel from './WalletPanel.jsx';
 import BuildBadge from './BuildBadge.jsx';
 import { encryptMessage, encryptNick, decryptNick, decryptMessageObject } from '../utils/crypto.js';
 import { getNickColor } from '../utils/nickColor.js';
+import { useTranslation, interpolate, LanguageSwitcher } from '../utils/i18n.js';
 
 // In dev: Vite proxies /socket.io → localhost:3001 automatically.
 // In production: server serves the built client, so same origin = correct.
@@ -75,6 +76,7 @@ const IconWarning = () => (
 
 export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const { nickname, roomId, cryptoKey } = session;
+  const { t } = useTranslation();
   const [messages, setMessages] = useState([]);
   const [visibleCount, setVisibleCount] = useState(BATCH);
   const [onlineCount, setOnlineCount] = useState(0);
@@ -222,8 +224,8 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
               try {
                 const plainNick = await decryptNick(cryptoKey, obj.nick);
                 let text = '';
-                if (obj.subtype === 'pin') text = `${plainNick} закрепил(а) сообщение`;
-                else if (obj.subtype === 'unpin') text = `${plainNick} открепил(а) сообщение`;
+                if (obj.subtype === 'pin') text = interpolate(t('chat.sys_pinned'), { nick: plainNick });
+                else if (obj.subtype === 'unpin') text = interpolate(t('chat.sys_unpinned'), { nick: plainNick });
                 if (text) return { id: 'hist-sys-' + i, type: 'system', text, ts: obj.ts };
               } catch { return null; }
             }
@@ -293,9 +295,9 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         let notifText = msg.text || '';
         try {
           const parsed = JSON.parse(notifText);
-          if (parsed.type === 'image') notifText = '📷 Фотография';
-          else if (parsed.type === 'file') notifText = '📎 ' + (parsed.file?.name || 'Файл');
-          else if (parsed.type === 'voice') notifText = '🎤 Голосовое сообщение';
+          if (parsed.type === 'image') notifText = t('chat.notif_photo');
+          else if (parsed.type === 'file') notifText = t('chat.notif_file') + ' ' + (parsed.file?.name || '');
+          else if (parsed.type === 'voice') notifText = t('chat.notif_voice');
           else if (typeof parsed.text === 'string') notifText = parsed.text;
         } catch { /* plain text */ }
         showBrowserNotif(msg.nick, notifText);
@@ -352,8 +354,8 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         try {
           const plainNick = await decryptNick(cryptoKey, byNick);
           const text = action === 'pin'
-            ? `${plainNick} закрепил(а) сообщение`
-            : `${plainNick} открепил(а) сообщение`;
+            ? interpolate(t('chat.sys_pinned'), { nick: plainNick })
+            : interpolate(t('chat.sys_unpinned'), { nick: plainNick });
           setMessages(prev => [
             ...prev,
             { id: 'sys-' + Date.now() + '-' + Math.random(), type: 'system', text, ts: Date.now() },
@@ -409,7 +411,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     }
   }, []);
 
-  // v0.2.0: format a timestamp into a Russian date label
+  // v0.2.0: format a timestamp into a localized date label
   const formatScrollDate = useCallback((ts) => {
     const msgDate = new Date(ts);
     const today = new Date();
@@ -419,15 +421,14 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       a.getFullYear() === b.getFullYear() &&
       a.getMonth() === b.getMonth() &&
       a.getDate() === b.getDate();
-    if (isSameDay(msgDate, today)) return 'Сегодня';
-    if (isSameDay(msgDate, yesterday)) return 'Вчера';
-    const months = ['января','февраля','марта','апреля','мая','июня',
-                    'июля','августа','сентября','октября','ноября','декабря'];
+    if (isSameDay(msgDate, today)) return t('chat.today');
+    if (isSameDay(msgDate, yesterday)) return t('chat.yesterday');
+    const months = t('chat.months');
     const day = msgDate.getDate();
-    const month = months[msgDate.getMonth()];
+    const month = Array.isArray(months) ? months[msgDate.getMonth()] : '';
     if (msgDate.getFullYear() === today.getFullYear()) return `${day} ${month}`;
     return `${day} ${month} ${msgDate.getFullYear()}`;
-  }, []);
+  }, [t]);
 
   const handleScroll = useCallback((e) => {
     const el = e.currentTarget;
@@ -522,15 +523,16 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   // Build typing label
   const typingArr = [...typingUsers];
   let typingLabel = '';
-  if (typingArr.length === 1) typingLabel = typingArr[0] + ' печатает...';
-  else if (typingArr.length === 2) typingLabel = typingArr.join(' и ') + ' печатают...';
-  else if (typingArr.length > 2) typingLabel = 'Несколько человек печатают...';
+  if (typingArr.length === 1) typingLabel = interpolate(t('chat.typing_one'), { nick: typingArr[0] });
+  else if (typingArr.length === 2) typingLabel = interpolate(t('chat.typing_two'), { a: typingArr[0], b: typingArr[1] });
+  else if (typingArr.length > 2) typingLabel = t('chat.typing_many');
 
   // Ping label
+  const msLabel = t('chat.ms');
   const pingLabel = ping === null ? null
-    : ping < 80 ? { text: ping + ' мс', cls: 'ping-good' }
-    : ping < 200 ? { text: ping + ' мс', cls: 'ping-ok' }
-    : { text: ping + ' мс', cls: 'ping-bad' };
+    : ping < 80 ? { text: ping + ' ' + msLabel, cls: 'ping-good' }
+    : ping < 200 ? { text: ping + ' ' + msLabel, cls: 'ping-ok' }
+    : { text: ping + ' ' + msLabel, cls: 'ping-bad' };
 
   return (
     <div className="chat-container">
@@ -540,7 +542,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         <div className="chat-preloader">
           <div className="preloader-logo">EM</div>
           <div className="preloader-spinner" />
-          <p className="preloader-text">Подключение к чату...</p>
+          <p className="preloader-text">{t('chat.preloader')}</p>
         </div>
       )}
 
@@ -551,17 +553,17 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           <div className="header-logo">EM</div>
           <div className="header-chat-info">
             <div className="header-chat-name-row">
-              <span className="header-chat-name">Секретный чат</span>
+              <span className="header-chat-name">{t('chat.name')}</span>
               {suspiciousActivity && (
-                <span className="header-warning-badge" title="Подозрительная активность: необычное число входов/выходов">
-                  <IconWarning /> Подозрительная активность
+                <span className="header-warning-badge" title={t('chat.suspicious_title')}>
+                  <IconWarning /> {t('chat.suspicious')}
                 </span>
               )}
             </div>
             <div className="header-meta-row">
               <span className={`header-status-dot ${status === 'online' ? 'dot-online' : status === 'offline' ? 'dot-offline' : 'dot-connecting'}`} />
               <span className="header-status-text">
-                {status === 'online' ? 'Подключено' : status === 'offline' ? 'Переподключение...' : 'Подключение...'}
+                {status === 'online' ? t('chat.status_online') : status === 'offline' ? t('chat.status_offline') : t('chat.status_connecting')}
               </span>
               {pingLabel && (
                 <>
@@ -586,7 +588,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           <button
             className={'header-btn' + (showMediaPanel ? ' active' : '')}
             onClick={() => setShowMediaPanel(v => !v)}
-            title="Медиафайлы чата"
+            title={t('chat.media_title')}
           >
             <IconMedia />
           </button>
@@ -601,11 +603,12 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
             <span>{nickname}</span>
           </div>
           <WalletPanel mode="compact" />
-          <button className="leave-btn" onClick={onLeaveRoom} title="Сменить чат">
+          <LanguageSwitcher />
+          <button className="leave-btn" onClick={onLeaveRoom} title={t('chat.leave_title')}>
             <IconChevronLeft />
-            <span>Чаты</span>
+            <span>{t('chat.chats_btn')}</span>
           </button>
-          <button className="logout-btn" onClick={onLogout} title="Выйти">
+          <button className="logout-btn" onClick={onLogout} title={t('chat.logout_title')}>
             <IconLogout />
           </button>
         </div>
@@ -631,12 +634,12 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         {messages.length === 0 && status === 'online' && (
           <div className="empty-state">
             <div className="empty-icon">💬</div>
-            <p className="empty-title">Чат пуст</p>
-            <p className="empty-hint">Напишите первое сообщение. Оно будет зашифровано.</p>
+            <p className="empty-title">{t('chat.empty_title')}</p>
+            <p className="empty-hint">{t('chat.empty_hint')}</p>
           </div>
         )}
         {visibleCount < messages.length && (
-          <div className="load-more-hint">▲ Прокрутите вверх для загрузки старых сообщений</div>
+          <div className="load-more-hint">{t('chat.load_more')}</div>
         )}
         {messages.slice(-visibleCount).map(msg => (
           <Message
@@ -672,7 +675,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
 
       {/* ── Scroll-to-bottom button ── */}
       {showScrollBtn && (
-        <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="В конец">
+        <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title={t('chat.scroll_bottom')}>
           <IconArrowDown />
           {unreadCount > 0 && (
             <span className="scroll-unread-badge">

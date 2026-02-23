@@ -3810,6 +3810,39 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
+/*  v0.2.2 — LANGUAGE SWITCHER                                                 */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.lang-switcher {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  margin-top: 8px;
+}
+.lang-btn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px;
+  color: rgba(255,255,255,0.45);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 3px 6px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.lang-btn:hover {
+  border-color: rgba(255,255,255,0.3);
+  color: rgba(255,255,255,0.8);
+}
+.lang-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* In chat header — no top margin */
+.header-right .lang-switcher { margin-top: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
 /*  v0.2.0 — SCROLL DATE LABEL                                                 */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 

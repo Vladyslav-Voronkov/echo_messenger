@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation, LOCALE_MAP } from '../utils/i18n.js';
 
 /* ── SVG icons ── */
 const IconImage = () => (
@@ -87,17 +88,10 @@ const IconChevronRight = () => (
   </svg>
 );
 
-function formatDate(ts) {
+function formatDate(ts, locale) {
   if (!ts) return '';
   const d = new Date(ts);
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
-}
-
-function formatSize(bytes) {
-  if (!bytes) return '';
-  if (bytes < 1024) return bytes + ' Б';
-  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' КБ';
-  return (bytes / (1024 * 1024)).toFixed(1) + ' МБ';
+  return d.toLocaleDateString(locale || 'en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
 function formatDuration(secs) {
@@ -129,6 +123,16 @@ function parseMediaMsg(msg) {
 }
 
 export default function MediaPanel({ messages, cryptoKey, roomId, onClose, onScrollToMessage }) {
+  const { t, lang } = useTranslation();
+  const locale = LOCALE_MAP[lang] || 'en-GB';
+
+  const formatSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return bytes + ' ' + t('media.size_b');
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' ' + t('media.size_kb');
+    return (bytes / (1024 * 1024)).toFixed(1) + ' ' + t('media.size_mb');
+  };
+
   const [activeTab, setActiveTab] = useState('photos');
 
   // Split messages into categories
@@ -147,17 +151,17 @@ export default function MediaPanel({ messages, cryptoKey, roomId, onClose, onScr
   }, [messages]);
 
   const tabs = [
-    { id: 'photos', icon: <IconImage />, label: 'Фото', count: photos.length },
-    { id: 'files', icon: <IconFile />, label: 'Файлы', count: files.length },
-    { id: 'voices', icon: <IconMic />, label: 'Голосовые', count: voices.length },
+    { id: 'photos', icon: <IconImage />, label: t('media.tab_photos'), count: photos.length },
+    { id: 'files', icon: <IconFile />, label: t('media.tab_files'), count: files.length },
+    { id: 'voices', icon: <IconMic />, label: t('media.tab_voices'), count: voices.length },
   ];
 
   return (
     <div className="media-panel glass">
       {/* Header */}
       <div className="media-panel-header">
-        <span className="media-panel-title">Медиафайлы</span>
-        <button className="media-panel-close" onClick={onClose} aria-label="Закрыть">
+        <span className="media-panel-title">{t('media.title')}</span>
+        <button className="media-panel-close" onClick={onClose} aria-label={t('media.close')}>
           <IconClose />
         </button>
       </div>
@@ -181,7 +185,7 @@ export default function MediaPanel({ messages, cryptoKey, roomId, onClose, onScr
       <div className="media-panel-content">
         {activeTab === 'photos' && (
           photos.length === 0 ? (
-            <div className="media-empty">Нет фотографий</div>
+            <div className="media-empty">{t('media.empty_photos')}</div>
           ) : (
             <div className="media-grid">
               {photos.map(({ msg, data }) => (
@@ -189,12 +193,12 @@ export default function MediaPanel({ messages, cryptoKey, roomId, onClose, onScr
                   key={msg.id}
                   className="media-grid-item"
                   onClick={() => onScrollToMessage(msg.id)}
-                  title={'От ' + msg.nick + ' · ' + formatDate(msg.ts)}
+                  title={t('media.from') + ' ' + msg.nick + ' · ' + formatDate(msg.ts, locale)}
                 >
                   {/* Thumbnail placeholder — clicking scrolls to the message in chat */}
                   <div className="media-grid-thumb">
                     <span className="media-grid-thumb-icon"><IconGridImage /></span>
-                    <span className="media-grid-thumb-date">{formatDate(msg.ts)}</span>
+                    <span className="media-grid-thumb-date">{formatDate(msg.ts, locale)}</span>
                     <span className="media-grid-thumb-nick">{msg.nick}</span>
                   </div>
                 </div>
@@ -205,7 +209,7 @@ export default function MediaPanel({ messages, cryptoKey, roomId, onClose, onScr
 
         {activeTab === 'files' && (
           files.length === 0 ? (
-            <div className="media-empty">Нет файлов</div>
+            <div className="media-empty">{t('media.empty_files')}</div>
           ) : (
             <div className="media-file-list">
               {files.map(({ msg, data }) => (
@@ -216,9 +220,9 @@ export default function MediaPanel({ messages, cryptoKey, roomId, onClose, onScr
                 >
                   <span className="media-file-icon">{getFileIconComp(data.mime)}</span>
                   <div className="media-file-info">
-                    <span className="media-file-name">{data.name || 'Файл'}</span>
+                    <span className="media-file-name">{data.name || t('msg.file')}</span>
                     <span className="media-file-meta">
-                      {formatSize(data.size)} · {formatDate(msg.ts)} · {msg.nick}
+                      {formatSize(data.size)} · {formatDate(msg.ts, locale)} · {msg.nick}
                     </span>
                   </div>
                   <span className="media-file-arrow"><IconChevronRight /></span>
@@ -230,7 +234,7 @@ export default function MediaPanel({ messages, cryptoKey, roomId, onClose, onScr
 
         {activeTab === 'voices' && (
           voices.length === 0 ? (
-            <div className="media-empty">Нет голосовых сообщений</div>
+            <div className="media-empty">{t('media.empty_voices')}</div>
           ) : (
             <div className="media-file-list">
               {voices.map(({ msg, data }) => (
@@ -241,9 +245,9 @@ export default function MediaPanel({ messages, cryptoKey, roomId, onClose, onScr
                 >
                   <span className="media-file-icon"><IconVoiceItem /></span>
                   <div className="media-file-info">
-                    <span className="media-file-name">Голосовое сообщение</span>
+                    <span className="media-file-name">{t('media.voice_name')}</span>
                     <span className="media-file-meta">
-                      {formatDuration(data.duration)} · {formatDate(msg.ts)} · {msg.nick}
+                      {formatDuration(data.duration)} · {formatDate(msg.ts, locale)} · {msg.nick}
                     </span>
                   </div>
                   <span className="media-file-arrow"><IconChevronRight /></span>

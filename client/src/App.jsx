@@ -3,6 +3,7 @@ import AuthScreen from './components/AuthScreen.jsx';
 import RoomScreen from './components/RoomScreen.jsx';
 import ChatScreen from './components/ChatScreen.jsx';
 import { deriveRoomId, deriveKey } from './utils/crypto.js';
+import { LangProvider, useTranslation } from './utils/i18n.js';
 
 const SESSION_KEY = 'echo_session';
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -30,7 +31,8 @@ function loadSavedSession() {
  *   'deriving' — PBKDF2 key derivation running
  *   'chat'     — active encrypted chat
  */
-export default function App() {
+function AppInner() {
+  const { t } = useTranslation();
   // Lazy initializers: read localStorage once on mount
   const [phase, setPhase] = useState(() => loadSavedSession() ? 'room' : 'auth');
   const [account, setAccount] = useState(() => loadSavedSession());
@@ -57,10 +59,10 @@ export default function App() {
       setPhase('chat');
     } catch (err) {
       console.error(err);
-      setError('Ошибка генерации ключа. Попробуйте снова.');
+      setError(t('app.key_error'));
       setPhase('room');
     }
-  }, [account]);
+  }, [account, t]);
 
   const handleLeaveRoom = useCallback(() => {
     setSession(null);
@@ -96,5 +98,13 @@ export default function App() {
       onLeaveRoom={handleLeaveRoom}
       onLogout={handleLogout}
     />
+  );
+}
+
+export default function App() {
+  return (
+    <LangProvider>
+      <AppInner />
+    </LangProvider>
   );
 }

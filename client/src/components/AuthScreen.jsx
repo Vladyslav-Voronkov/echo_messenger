@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import BuildBadge from './BuildBadge.jsx';
+import { useTranslation, LanguageSwitcher } from '../utils/i18n.js';
 
 /**
  * AuthScreen — Register or Login with nickname + password.
@@ -25,7 +26,7 @@ async function registerOnServer(nickname, serverHash) {
     body: JSON.stringify({ nickname, passwordHash: serverHash }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Ошибка регистрации');
+  if (!res.ok) throw new Error(data.error || 'Registration error');
   return data; // { ok, nickname, createdAt }
 }
 
@@ -36,11 +37,12 @@ async function loginOnServer(nickname, serverHash) {
     body: JSON.stringify({ nickname, passwordHash: serverHash }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Ошибка входа');
+  if (!res.ok) throw new Error(data.error || 'Login error');
   return data; // { ok, nickname, createdAt }
 }
 
 export default function AuthScreen({ onAuth }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState('login');
   const [nickname, setNickname] = useState('');
   const [password, setPassword] = useState('');
@@ -49,8 +51,8 @@ export default function AuthScreen({ onAuth }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const switchTab = (t) => {
-    setTab(t);
+  const switchTab = (newTab) => {
+    setTab(newTab);
     setError('');
     setPassword('');
     setPasswordConfirm('');
@@ -66,11 +68,11 @@ export default function AuthScreen({ onAuth }) {
     // Client-side validation before hitting server
     if (tab === 'register') {
       if (password.length < 6) {
-        setError('Пароль должен быть не менее 6 символов');
+        setError(t('auth.err_short_pass'));
         return;
       }
       if (password !== passwordConfirm) {
-        setError('Пароли не совпадают');
+        setError(t('auth.err_pass_mismatch'));
         return;
       }
     }
@@ -87,7 +89,7 @@ export default function AuthScreen({ onAuth }) {
         onAuth({ nickname: data.nickname, createdAt: data.createdAt });
       }
     } catch (err) {
-      setError(err.message || 'Ошибка. Попробуйте снова.');
+      setError(err.message || t('auth.err_generic'));
     } finally {
       setLoading(false);
     }
@@ -103,7 +105,7 @@ export default function AuthScreen({ onAuth }) {
 
         <div className="login-header">
           <h1 className="login-title">ECHO MESSENGER</h1>
-          <p className="login-subtitle">Зашифрованный. Приватный. Надёжный.</p>
+          <p className="login-subtitle">{t('auth.subtitle')}</p>
         </div>
 
         {/* Tabs */}
@@ -113,26 +115,26 @@ export default function AuthScreen({ onAuth }) {
             onClick={() => switchTab('login')}
             type="button"
           >
-            Вход
+            {t('auth.tab_login')}
           </button>
           <button
             className={'auth-tab' + (tab === 'register' ? ' active' : '')}
             onClick={() => switchTab('register')}
             type="button"
           >
-            Регистрация
+            {t('auth.tab_register')}
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
           <div className="field-group">
-            <label htmlFor="auth-nick">Никнейм</label>
+            <label htmlFor="auth-nick">{t('auth.field_nickname')}</label>
             <input
               id="auth-nick"
               type="text"
               value={nickname}
               onChange={e => setNickname(e.target.value)}
-              placeholder="Ваш никнейм"
+              placeholder={t('auth.placeholder_nickname')}
               maxLength={32}
               disabled={loading}
               autoComplete="username"
@@ -143,14 +145,14 @@ export default function AuthScreen({ onAuth }) {
           </div>
 
           <div className="field-group">
-            <label htmlFor="auth-pass">Пароль</label>
+            <label htmlFor="auth-pass">{t('auth.field_password')}</label>
             <div className="seed-input-wrapper">
               <input
                 id="auth-pass"
                 type={showPass ? 'text' : 'password'}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                placeholder={tab === 'register' ? 'Минимум 6 символов' : 'Ваш пароль'}
+                placeholder={tab === 'register' ? t('auth.placeholder_pass_new') : t('auth.placeholder_pass_existing')}
                 disabled={loading}
                 autoComplete={tab === 'register' ? 'new-password' : 'current-password'}
                 autoFocus
@@ -160,7 +162,7 @@ export default function AuthScreen({ onAuth }) {
                 className="toggle-seed"
                 onClick={() => setShowPass(v => !v)}
                 tabIndex={-1}
-                aria-label="Показать/скрыть пароль"
+                aria-label={t('auth.aria_toggle_pass')}
               >
                 {showPass ? '🙈' : '👁️'}
               </button>
@@ -169,13 +171,13 @@ export default function AuthScreen({ onAuth }) {
 
           {tab === 'register' && (
             <div className="field-group">
-              <label htmlFor="auth-pass2">Повторите пароль</label>
+              <label htmlFor="auth-pass2">{t('auth.field_confirm')}</label>
               <input
                 id="auth-pass2"
                 type={showPass ? 'text' : 'password'}
                 value={passwordConfirm}
                 onChange={e => setPasswordConfirm(e.target.value)}
-                placeholder="Повторите пароль"
+                placeholder={t('auth.placeholder_confirm')}
                 disabled={loading}
                 autoComplete="new-password"
               />
@@ -190,18 +192,19 @@ export default function AuthScreen({ onAuth }) {
             disabled={loading || !nickname.trim() || !password}
           >
             {loading ? (
-              <span className="btn-loading"><span className="spinner" /> Подождите...</span>
-            ) : tab === 'login' ? 'Войти' : 'Создать аккаунт'}
+              <span className="btn-loading"><span className="spinner" /> {t('auth.loading')}</span>
+            ) : tab === 'login' ? t('auth.btn_login') : t('auth.btn_register')}
           </button>
         </form>
 
         <div className="login-security-badges">
-          <span className="badge">Сервер не видит данные</span>
+          <span className="badge">{t('auth.badge_server')}</span>
           <span className="badge">AES-256-GCM</span>
           <span className="badge">Zero Knowledge</span>
         </div>
 
         <BuildBadge />
+        <LanguageSwitcher />
       </div>
     </div>
   );

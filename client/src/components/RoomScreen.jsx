@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import WalletPanel from './WalletPanel.jsx';
 import BuildBadge from './BuildBadge.jsx';
+import { useTranslation, LanguageSwitcher } from '../utils/i18n.js';
 
 export default function RoomScreen({ account, onJoin, onLogout, isLoading, error }) {
+  const { t } = useTranslation();
   const [seedPhrase, setSeedPhrase] = useState('');
   const [showSeed, setShowSeed] = useState(false);
 
@@ -24,15 +26,15 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
           <h1 className="login-title">ECHO MESSENGER</h1>
           <div className="room-account-info">
             <span className="room-nick">👤 {account.nickname}</span>
-            <button className="link-btn" onClick={onLogout}>Выйти</button>
+            <button className="link-btn" onClick={onLogout}>{t('room.logout')}</button>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
           <div className="field-group">
             <label htmlFor="seedphrase">
-              Ключ чата
-              <span className="label-hint"> — ключ доступа и шифрования</span>
+              {t('room.field_key')}
+              <span className="label-hint"> {t('room.key_hint_inline')}</span>
             </label>
             <div className="seed-input-wrapper">
               <input
@@ -40,7 +42,7 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
                 type={showSeed ? 'text' : 'password'}
                 value={seedPhrase}
                 onChange={e => setSeedPhrase(e.target.value)}
-                placeholder="Введите ключ для входа в чат"
+                placeholder={t('room.placeholder_key')}
                 disabled={isLoading}
                 autoComplete="off"
                 autoCorrect="off"
@@ -52,13 +54,13 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
                 className="toggle-seed"
                 onClick={() => setShowSeed(v => !v)}
                 tabIndex={-1}
-                aria-label="Показать/скрыть фразу"
+                aria-label={t('room.aria_show_key')}
               >
                 {showSeed ? '🙈' : '👁️'}
               </button>
             </div>
             <p className="field-hint">
-              Любой с тем же ключом может войти в чат. Сервер видит только хэш.
+              {t('room.field_hint')}
             </p>
           </div>
 
@@ -71,22 +73,23 @@ export default function RoomScreen({ account, onJoin, onLogout, isLoading, error
           >
             {isLoading ? (
               <span className="btn-loading">
-                <span className="spinner" /> Генерация ключа...
+                <span className="spinner" /> {t('room.loading')}
               </span>
             ) : (
-              'Войти в чат'
+              t('room.btn_join')
             )}
           </button>
         </form>
 
         <div className="login-security-badges">
           <span className="badge">AES-256-GCM</span>
-          <span className="badge">PBKDF2 · 100k итераций</span>
+          <span className="badge">{t('room.badge_pbkdf2')}</span>
           <span className="badge">Zero Knowledge</span>
         </div>
 
         <WalletPanel mode="full" />
         <BuildBadge />
+        <LanguageSwitcher />
       </div>
     </div>
   );

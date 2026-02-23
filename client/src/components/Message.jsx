@@ -3,6 +3,7 @@ import ImageMessage from './ImageMessage.jsx';
 import FileMessage from './FileMessage.jsx';
 import VoiceMessage from './VoiceMessage.jsx';
 import { getNickColor } from '../utils/nickColor.js';
+import { useTranslation, LOCALE_MAP } from '../utils/i18n.js';
 
 function parseMessage(raw) {
   try {
@@ -43,6 +44,7 @@ const IconHeart = () => (
 );
 
 export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike, pins, onPin }) {
+  const { t, lang } = useTranslation();
   // System notification messages (join/leave/pin)
   if (message.type === 'system') {
     return (
@@ -68,7 +70,7 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
   // Is this message pinned?
   const isPinned = pins && pins.some(p => p.ts === ts);
 
-  const time = new Date(ts).toLocaleTimeString('ru-RU', {
+  const time = new Date(ts).toLocaleTimeString(LOCALE_MAP[lang] || 'en-GB', {
     hour: '2-digit', minute: '2-digit',
   });
 
@@ -79,11 +81,11 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
 
   const handleReplyClick = () => {
     const replyText = parsed.type === 'image'
-      ? 'Фотография'
+      ? t('msg.photo')
       : parsed.type === 'file'
-        ? (parsed.fileData && parsed.fileData.name ? parsed.fileData.name : 'Файл')
+        ? (parsed.fileData && parsed.fileData.name ? parsed.fileData.name : t('msg.file'))
         : parsed.type === 'voice'
-          ? 'Голосовое сообщение'
+          ? t('msg.voice')
           : (parsed.text || message.text);
     onReply({ id: message.id, nick, text: replyText });
   };
@@ -115,14 +117,14 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
 
       {!isOwn && (
         <div className={'msg-actions msg-actions-left' + (hovered ? ' visible' : '')}>
-          <button className="action-btn" onClick={handleReplyClick} title="Ответить">
+          <button className="action-btn" onClick={handleReplyClick} title={t('msg.reply')}>
             <IconReply />
           </button>
           {onPin && (
             <button
               className={'action-btn pin-btn' + (isPinned ? ' pinned' : '')}
               onClick={() => onPin(message)}
-              title={isPinned ? 'Открепить' : 'Закрепить'}
+              title={isPinned ? t('msg.unpin') : t('msg.pin')}
             >
               <IconPin />
             </button>
@@ -139,7 +141,7 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
           <div
             className={'reply-quote' + (replyTo.id ? ' reply-quote-clickable' : '')}
             onClick={handleQuoteClick}
-            title={replyTo.id ? 'Перейти к сообщению' : ''}
+            title={replyTo.id ? t('msg.goto') : ''}
           >
             <span className="reply-quote-nick">{replyTo.nick}</span>
             <span className="reply-quote-text">
@@ -174,12 +176,12 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
             <button
               className={'action-btn pin-btn' + (isPinned ? ' pinned' : '')}
               onClick={() => onPin(message)}
-              title={isPinned ? 'Открепить' : 'Закрепить'}
+              title={isPinned ? t('msg.unpin') : t('msg.pin')}
             >
               <IconPin />
             </button>
           )}
-          <button className="action-btn" onClick={handleReplyClick} title="Ответить">
+          <button className="action-btn" onClick={handleReplyClick} title={t('msg.reply')}>
             <IconReply />
           </button>
         </div>

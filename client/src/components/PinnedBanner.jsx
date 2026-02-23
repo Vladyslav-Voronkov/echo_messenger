@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from '../utils/i18n.js';
 
 /* ── SVG icons ── */
 const IconPin = () => (
@@ -29,19 +30,20 @@ const IconMic = () => (
   </svg>
 );
 
-function getPreviewText(msg) {
-  if (!msg) return '...';
+function getPreviewText(msg, t) {
+  if (!msg) return { icon: null, text: '...' };
   try {
     const parsed = JSON.parse(msg.text);
-    if (parsed && parsed.type === 'image') return { icon: 'image', text: 'Фотография' };
-    if (parsed && parsed.type === 'file') return { icon: 'file', text: parsed.file?.name || 'Файл' };
-    if (parsed && parsed.type === 'voice') return { icon: 'voice', text: 'Голосовое сообщение' };
+    if (parsed && parsed.type === 'image') return { icon: 'image', text: t('msg.photo') };
+    if (parsed && parsed.type === 'file') return { icon: 'file', text: parsed.file?.name || t('msg.file') };
+    if (parsed && parsed.type === 'voice') return { icon: 'voice', text: t('msg.voice') };
     if (parsed && parsed.text) return { icon: null, text: parsed.text };
   } catch { /* not JSON — plain text */ }
   return { icon: null, text: msg.text || '...' };
 }
 
 export default function PinnedBanner({ pins, messages, activePinIdx, onChangePin, onScrollToPin }) {
+  const { t } = useTranslation();
   if (!pins || pins.length === 0) return null;
 
   const activePin = pins[activePinIdx] ?? pins[0];
@@ -52,7 +54,7 @@ export default function PinnedBanner({ pins, messages, activePinIdx, onChangePin
     [messages, activePin.ts]
   );
 
-  const { icon: previewIcon, text: previewText } = getPreviewText(pinnedMsg);
+  const { icon: previewIcon, text: previewText } = getPreviewText(pinnedMsg, t);
   const displayText = typeof previewText === 'string' && previewText.length > 60 ? previewText.slice(0, 60) + '...' : (previewText || '');
   const senderNick = pinnedMsg?.nick || '';
 
@@ -78,7 +80,7 @@ export default function PinnedBanner({ pins, messages, activePinIdx, onChangePin
       </span>
       <div className="pinned-content">
         <span className="pinned-label">
-          Закреплено {pins.length > 1 ? `(${activePinIdx + 1}/${pins.length})` : ''}
+          {t('pinned.label')} {pins.length > 1 ? `(${activePinIdx + 1}/${pins.length})` : ''}
           {senderNick ? ' · ' + senderNick : ''}
         </span>
         <span className="pinned-text">
@@ -89,9 +91,9 @@ export default function PinnedBanner({ pins, messages, activePinIdx, onChangePin
         </span>
       </div>
       {pins.length > 1 && (
-        <div className="pinned-nav" role="group" aria-label="Навигация по закреплённым">
-          <button className="pinned-nav-btn" onClick={handlePrev} title="Предыдущее закреплённое">‹</button>
-          <button className="pinned-nav-btn" onClick={handleNext} title="Следующее закреплённое">›</button>
+        <div className="pinned-nav" role="group" aria-label={t('pinned.aria_nav')}>
+          <button className="pinned-nav-btn" onClick={handlePrev} title={t('pinned.prev')}>‹</button>
+          <button className="pinned-nav-btn" onClick={handleNext} title={t('pinned.next')}>›</button>
         </div>
       )}
     </div>
