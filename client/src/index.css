@@ -764,8 +764,16 @@ body {
   .lock-icon   { font-size: 44px; }
   .login-title { font-size: 26px; }
 
-  /* Chat header */
-  .chat-header { padding: 8px 12px; }
+  /* Chat header — prevent icon overflow */
+  .chat-header  { padding: 8px 12px; overflow: hidden; }
+  .header-left  { flex: 1; min-width: 0; overflow: hidden; }
+  .header-right { flex-shrink: 0; gap: 6px; }
+  .header-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 130px;
+  }
   .nick-badge  { display: none; }
   .online-badge span:last-child { display: none; } /* hide "онлайн" text, keep dot + number */
 
@@ -780,10 +788,20 @@ body {
   /* Footer */
   .chat-footer  { padding: 8px 12px 14px; }
   .send-btn     { width: 44px; height: 44px; }
+
+  /* Touch targets — увеличить для пальцев */
+  .input-icon-btn     { width: 40px; height: 40px; }
+  .input-bar .mic-btn { width: 44px; height: 44px; }
+
+  /* Emoji picker / attach menu — не вылезать за правый край экрана */
+  .emoji-picker { left: auto; right: 0; max-width: calc(100vw - 24px); }
+  .attach-menu  { max-width: calc(100vw - 24px); }
 }
 
 @media (max-width: 380px) {
-  .logout-btn { padding: 6px 10px; font-size: 12px; }
+  .logout-btn   { padding: 6px 10px; font-size: 12px; }
+  .leave-btn    { padding: 5px 8px; font-size: 11px; }
+  .header-title { max-width: 80px; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
