@@ -54,16 +54,23 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
     );
   }
 
-  // AI command message — own message with purple/cyan highlight
+  // AI command message — shows who queried ChatGPT, aligned by isOwn
   if (message.type === 'ai_command') {
     const time = new Date(message.ts).toLocaleTimeString(LOCALE_MAP[lang] || 'en-GB', { hour: '2-digit', minute: '2-digit' });
-    // text may be plain (local placeholder) or JSON (received from server)
     let cmdText = message.text;
     try { const p = JSON.parse(message.text); if (p && typeof p.text === 'string') cmdText = p.text; } catch { /* plain */ }
+    const senderColor = getNickColor(message.nick);
     return (
-      <div className="message-row own" data-msg-id={message.id} data-ts={message.ts}>
+      <div className={'message-row ' + (message.isOwn ? 'own' : 'other')} data-msg-id={message.id} data-ts={message.ts}>
+        {!message.isOwn && (
+          <div className="msg-avatar" style={{ background: senderColor }} title={message.nick}>
+            {message.nick ? message.nick[0].toUpperCase() : '?'}
+          </div>
+        )}
         <div className="message-bubble ai-command-bubble">
           <div className="ai-command-header">
+            <span className="ai-command-sender" style={{ color: senderColor }}>{message.nick}</span>
+            <span className="ai-command-arrow">→</span>
             <span className="ai-command-icon">✦</span>
             <span className="ai-command-label">ChatGPT</span>
           </div>
