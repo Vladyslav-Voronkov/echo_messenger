@@ -14,6 +14,73 @@ import { useTranslation, interpolate, LanguageSwitcher } from '../utils/i18n.jsx
 // In production: server serves the built client, so same origin = correct.
 const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
+// ── Build OpenAI context from chat history ────────────────────────────────────
+function buildAIContext(messages, query) {
+  const chatLines = [];
+  const aiTurns  = [];
+  const relevant  = messages.filter(m => m.type !== 'system').slice(-30);
+
+  let i = 0;
+  while (i < relevant.length) {
+    const msg = relevant[i];
+
+    // Detect type: either local flag or JSON content
+    let isCmd  = msg.type === 'ai_command';
+    let isResp = msg.type === 'ai_response';
+    if (!isCmd && !isResp) {
+      try {
+        const p = JSON.parse(msg.text);
+        if (p.type === 'ai_command')  isCmd  = true;
+        if (p.type === 'ai_response') isResp = true;
+      } catch { /* plain text */ }
+    }
+
+    if (isCmd) {
+      // Extract query text
+      let qText = msg.text;
+      try { const p = JSON.parse(msg.text); if (p.text) qText = p.text; } catch { /* already plain */ }
+
+      // Look for paired response
+      let rText = null;
+      const nxt = relevant[i + 1];
+      if (nxt) {
+        let nxtIsResp = nxt.type === 'ai_response';
+        if (!nxtIsResp) { try { nxtIsResp = JSON.parse(nxt.text).type === 'ai_response'; } catch {} }
+        if (nxtIsResp && !nxt.generating) {
+          try { const p = JSON.parse(nxt.text); rText = p.text || nxt.text; } catch { rText = nxt.text; }
+          i++;
+        }
+      }
+      aiTurns.push({ query: qText, response: rText });
+
+    } else if (!isResp) {
+      // Regular text message
+      let text = msg.text;
+      try {
+        const p = JSON.parse(msg.text);
+        if (p.type === 'image' || p.type === 'file' || p.type === 'voice') { i++; continue; }
+        if (typeof p.text === 'string') text = p.text;
+      } catch { /* plain text */ }
+      if (text && text.trim()) chatLines.push(`${msg.nick}: ${text}`);
+    }
+    i++;
+  }
+
+  const msgs = [];
+  let sys = 'You are ChatGPT, an AI assistant integrated into a secure encrypted group chat. Be helpful, concise, and friendly.';
+  if (chatLines.length > 0) sys += '\n\nRecent group chat:\n' + chatLines.slice(-10).join('\n');
+  msgs.push({ role: 'system', content: sys });
+
+  // Previous AI conversation turns (max 5 pairs for context window)
+  for (const turn of aiTurns.slice(-5)) {
+    msgs.push({ role: 'user', content: turn.query });
+    if (turn.response) msgs.push({ role: 'assistant', content: turn.response });
+  }
+
+  msgs.push({ role: 'user', content: query });
+  return msgs;
+}
+
 const BATCH = 50; // messages to render per window
 
 // Suspicious activity: if more than this many distinct join/leave events in this window
@@ -231,7 +298,14 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
             }
             const msg = await decryptMessageObject(cryptoKey, obj);
             if (!msg) return null;
-            return { ...msg, id: 'hist-' + i, isOwn: msg.nick === nickname };
+            // Detect AI message types from JSON content
+            let msgType;
+            try {
+              const p = JSON.parse(msg.text);
+              if (p.type === 'ai_command')  msgType = 'ai_command';
+              if (p.type === 'ai_response') msgType = 'ai_response';
+            } catch { /* plain text */ }
+            return { ...msg, type: msgType, id: 'hist-' + i, isOwn: msg.nick === nickname };
           } catch { return null; }
         })
       );
@@ -277,18 +351,40 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
     socket.on('message', async ({ encrypted }) => {
       const msg = await decryptMessageObject(cryptoKey, encrypted);
       if (!msg) return;
-      setTypingUsers(prev => {
-        const s = new Set(prev);
-        s.delete(msg.nick);
-        return s;
-      });
+
+      // Detect AI message types from JSON content
+      let detectedType;
+      try {
+        const p = JSON.parse(msg.text);
+        if (p.type === 'ai_command')  detectedType = 'ai_command';
+        if (p.type === 'ai_response') detectedType = 'ai_response';
+      } catch { /* plain text — not an AI message */ }
+
+      // Dedup: sender already has a local placeholder with same type+ts — skip echo
+      if (detectedType) {
+        const alreadyLocal = messagesRef.current.some(
+          m => m.type === detectedType && m.ts === msg.ts
+        );
+        if (alreadyLocal) return;
+      }
+
+      // Remove typing indicator (only for regular messages)
+      if (!detectedType) {
+        setTypingUsers(prev => {
+          const s = new Set(prev);
+          s.delete(msg.nick);
+          return s;
+        });
+      }
+
       const isOwn = msg.nick === nickname;
       setMessages(prev => [
         ...prev,
-        { ...msg, id: 'live-' + Date.now() + '-' + Math.random(), isOwn },
+        { ...msg, type: detectedType, id: 'live-' + Date.now() + '-' + Math.random(), isOwn },
       ]);
-      // v0.2.0: sound + push notif + unread counter for messages from others
-      if (!isOwn) {
+
+      // Notifications only for regular messages from others
+      if (!isOwn && !detectedType) {
         if (document.hidden || showScrollBtnRef.current) {
           playNotifSound();
         }
@@ -302,7 +398,6 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           else if (typeof parsed.text === 'string') notifText = parsed.text;
         } catch { /* plain text */ }
         showBrowserNotif(msg.nick, notifText);
-        // Increment unread counter when user is not at bottom
         if (showScrollBtnRef.current) {
           setUnreadCount(prev => prev + 1);
         }
@@ -349,13 +444,29 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       }
     });
 
-    socket.on('ai_response', ({ queryId, text: aiText, done, error }) => {
+    socket.on('ai_response', async ({ queryId, text: aiText, done, error }) => {
+      if (!done) return; // streaming not used, but guard anyway
+      const respTs = Date.now();
+
+      // Update local generating placeholder → show response immediately for sender
       setMessages(prev => prev.map(msg => {
         if (msg.type === 'ai_response' && msg.queryId === queryId) {
-          return { ...msg, text: aiText, generating: !done, error: error || false };
+          return { ...msg, text: aiText, generating: false, ts: respTs, error: error || false };
         }
         return msg;
       }));
+
+      // Encrypt ai_response and broadcast to room (saves to history, visible to all)
+      try {
+        const [respEnc, encNickGPT] = await Promise.all([
+          encryptMessage(cryptoKey, JSON.stringify({ type: 'ai_response', text: aiText })),
+          encryptNick(cryptoKey, 'ChatGPT'),
+        ]);
+        socketRef.current.emit('message', {
+          roomId,
+          encrypted: { iv: respEnc.iv, data: respEnc.data, ts: respTs, nick: encNickGPT },
+        });
+      } catch (e) { console.error('ai_response encrypt error', e); }
     });
 
     socket.on('pins_updated', async ({ pins: updatedPins, action, byNick }) => {
@@ -392,19 +503,21 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const handleSend = useCallback(async (text) => {
     if (!text.trim() || !socketRef.current?.connected) return;
 
-    // /ai command — send to ChatGPT instead of broadcasting
+    // /ai command — query ChatGPT, save result encrypted for all
     const trimmed = text.trim();
     if (trimmed.startsWith('/ai ') || trimmed === '/ai') {
       const query = trimmed.slice(3).trim();
       if (!query) return;
       const queryId = 'ai-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-      const now = Date.now();
+      const cmdTs = Date.now();
+
+      // 1. Show local placeholders immediately
       const cmdMsg = {
         id: 'ai-cmd-' + queryId,
         type: 'ai_command',
         nick: nickname,
-        text: query,
-        ts: now,
+        text: query,          // plain text for local display
+        ts: cmdTs,
         isOwn: true,
       };
       const respMsg = {
@@ -412,13 +525,28 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         type: 'ai_response',
         nick: 'ChatGPT',
         text: '',
-        ts: now + 1,
+        ts: cmdTs + 1,
         isOwn: false,
         generating: true,
         queryId,
       };
       setMessages(prev => [...prev, cmdMsg, respMsg]);
-      socketRef.current.emit('ai_query', { queryId, text: query });
+
+      // 2. Encrypt the ai_command and broadcast to room (saves to history)
+      try {
+        const [cmdEnc, encNick] = await Promise.all([
+          encryptMessage(cryptoKey, JSON.stringify({ type: 'ai_command', text: query })),
+          encryptNick(cryptoKey, nickname),
+        ]);
+        socketRef.current.emit('message', {
+          roomId,
+          encrypted: { iv: cmdEnc.iv, data: cmdEnc.data, ts: cmdTs, nick: encNick },
+        });
+      } catch (e) { console.error('ai_command encrypt error', e); }
+
+      // 3. Send query to server with full conversation context
+      const context = buildAIContext(messagesRef.current, query);
+      socketRef.current.emit('ai_query', { queryId, text: query, context });
       setReplyTo(null);
       return;
     }

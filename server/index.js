@@ -571,13 +571,22 @@ io.on('connection', (socket) => {
   });
 
   // ── AI Query (ChatGPT integration) ─────────────────────────────────────────
-  socket.on('ai_query', async ({ queryId, text }) => {
+  socket.on('ai_query', async ({ queryId, text, context }) => {
     if (!queryId || typeof text !== 'string' || !text.trim()) return;
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       socket.emit('ai_response', { queryId, text: 'OPENAI_API_KEY не задан на сервере.', done: true, error: true });
       return;
     }
+
+    // Use context from client (chat history + previous AI turns + current query)
+    // or fall back to a simple single-turn request
+    const messages = (Array.isArray(context) && context.length > 0)
+      ? context
+      : [
+          { role: 'system', content: 'You are ChatGPT, an AI assistant in a secure encrypted group chat. Be helpful and concise.' },
+          { role: 'user', content: text.trim() },
+        ];
 
     try {
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -588,7 +597,7 @@ io.on('connection', (socket) => {
         },
         body: JSON.stringify({
           model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: text.trim() }],
+          messages,
           max_tokens: 1500,
         }),
       });
