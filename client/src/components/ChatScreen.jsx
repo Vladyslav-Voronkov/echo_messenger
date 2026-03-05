@@ -349,6 +349,15 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       }
     });
 
+    socket.on('ai_response', ({ queryId, text: aiText, done, error }) => {
+      setMessages(prev => prev.map(msg => {
+        if (msg.type === 'ai_response' && msg.queryId === queryId) {
+          return { ...msg, text: aiText, generating: !done, error: error || false };
+        }
+        return msg;
+      }));
+    });
+
     socket.on('pins_updated', async ({ pins: updatedPins, action, byNick }) => {
       if (Array.isArray(updatedPins)) setPins(updatedPins);
       if (action && byNick) {
@@ -382,6 +391,38 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
 
   const handleSend = useCallback(async (text) => {
     if (!text.trim() || !socketRef.current?.connected) return;
+
+    // /ai command — send to ChatGPT instead of broadcasting
+    const trimmed = text.trim();
+    if (trimmed.startsWith('/ai ') || trimmed === '/ai') {
+      const query = trimmed.slice(3).trim();
+      if (!query) return;
+      const queryId = 'ai-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      const now = Date.now();
+      const cmdMsg = {
+        id: 'ai-cmd-' + queryId,
+        type: 'ai_command',
+        nick: nickname,
+        text: query,
+        ts: now,
+        isOwn: true,
+      };
+      const respMsg = {
+        id: 'ai-resp-' + queryId,
+        type: 'ai_response',
+        nick: 'ChatGPT',
+        text: '',
+        ts: now + 1,
+        isOwn: false,
+        generating: true,
+        queryId,
+      };
+      setMessages(prev => [...prev, cmdMsg, respMsg]);
+      socketRef.current.emit('ai_query', { queryId, text: query });
+      setReplyTo(null);
+      return;
+    }
+
     const payload = replyTo ? JSON.stringify({ text: text.trim(), replyTo }) : text.trim();
     const [{ iv, data }, encNick] = await Promise.all([
       encryptMessage(cryptoKey, payload),

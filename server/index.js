@@ -570,6 +570,55 @@ io.on('connection', (socket) => {
     // But we could use this in the future for "away" indicator.
   });
 
+  // ── AI Query (ChatGPT integration) ─────────────────────────────────────────
+  socket.on('ai_query', async ({ queryId, text }) => {
+    if (!queryId || typeof text !== 'string' || !text.trim()) return;
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      socket.emit('ai_response', { queryId, text: 'OPENAI_API_KEY не задан на сервере.', done: true, error: true });
+      return;
+    }
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: text.trim() }],
+          max_tokens: 1500,
+        }),
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text();
+        console.error('OpenAI API error:', response.status, errBody);
+        socket.emit('ai_response', {
+          queryId,
+          text: 'Ошибка: не удалось получить ответ от ChatGPT (' + response.status + ').',
+          done: true,
+          error: true,
+        });
+        return;
+      }
+
+      const data = await response.json();
+      const aiText = data.choices?.[0]?.message?.content || 'Нет ответа.';
+      socket.emit('ai_response', { queryId, text: aiText, done: true });
+    } catch (err) {
+      console.error('OpenAI fetch error:', err);
+      socket.emit('ai_response', {
+        queryId,
+        text: 'Ошибка соединения с ChatGPT.',
+        done: true,
+        error: true,
+      });
+    }
+  });
+
   socket.on('disconnect', async () => {
     const meta = socketMeta.get(socket.id);
     socketMeta.delete(socket.id);

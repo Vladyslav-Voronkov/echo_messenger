@@ -53,6 +53,47 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
       </div>
     );
   }
+
+  // AI command message — own message with purple/cyan highlight
+  if (message.type === 'ai_command') {
+    const time = new Date(message.ts).toLocaleTimeString(LOCALE_MAP[lang] || 'en-GB', { hour: '2-digit', minute: '2-digit' });
+    return (
+      <div className="message-row own" data-msg-id={message.id} data-ts={message.ts}>
+        <div className="message-bubble ai-command-bubble">
+          <div className="ai-command-header">
+            <span className="ai-command-icon">✦</span>
+            <span className="ai-command-label">ChatGPT</span>
+          </div>
+          <p className="message-text">{message.text}</p>
+          <span className="message-time">{time}</span>
+        </div>
+      </div>
+    );
+  }
+
+  // AI response message — ChatGPT bubble with rainbow animation while generating
+  if (message.type === 'ai_response') {
+    const time = new Date(message.ts).toLocaleTimeString(LOCALE_MAP[lang] || 'en-GB', { hour: '2-digit', minute: '2-digit' });
+    return (
+      <div className="message-row other" data-msg-id={message.id} data-ts={message.ts}>
+        <div className="msg-avatar ai-avatar" title="ChatGPT">✦</div>
+        <div className={'message-bubble ai-response-bubble' + (message.generating ? ' ai-generating' : '')}>
+          <span className="message-nick ai-nick">
+            <span className="ai-stars">✦ ✦</span> ChatGPT
+          </span>
+          {message.generating ? (
+            <div className="ai-generating-dots">
+              <span /><span /><span />
+            </div>
+          ) : (
+            <p className="message-text" style={{ whiteSpace: 'pre-wrap' }}>{message.text}</p>
+          )}
+          <span className="message-time">{time}</span>
+        </div>
+      </div>
+    );
+  }
+
   const [hovered, setHovered] = useState(false);
   const { nick, ts, isOwn } = message;
   const parsed = parseMessage(message.text);
