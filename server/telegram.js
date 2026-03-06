@@ -181,35 +181,53 @@ export async function initTelegram({ token, dataDir, appendToRoom, broadcastToRo
 export async function forwardToTelegram(roomId, encryptedMsg) {
   if (!bot) return;
 
+  let matched = false;
   for (const [chatId, bridge] of Object.entries(bridges)) {
     if (bridge.roomId !== roomId || !bridge.key) continue;
+    matched = true;
+
+    let json;
+    try {
+      json = decryptData(bridge.key, encryptedMsg.iv, encryptedMsg.data);
+    } catch (e) {
+      console.error('[Telegram] Decrypt failed (Echo→TG):', e.message);
+      continue;
+    }
+
+    let msg;
+    try {
+      msg = JSON.parse(json);
+    } catch (e) {
+      console.error('[Telegram] JSON parse failed:', e.message, '| raw:', json?.slice(0, 100));
+      continue;
+    }
+
+    // Don't echo TG-originated messages back to Telegram
+    if (msg.fromTelegram) continue;
+
+    let outText;
+    if (msg.type === 'text' && msg.text) {
+      outText = `💬 ${msg.nick}: ${msg.text}`;
+    } else if (msg.type === 'image') {
+      outText = `🖼 ${msg.nick} sent an image`;
+    } else if (msg.type === 'voice') {
+      outText = `🎤 ${msg.nick} sent a voice message`;
+    } else if (msg.type === 'file') {
+      outText = `📎 ${msg.nick} sent a file${msg.file?.name ? ': ' + msg.file.name : ''}`;
+    } else {
+      console.log('[Telegram] Skipping message type:', msg.type);
+      continue;
+    }
 
     try {
-      const json = decryptData(bridge.key, encryptedMsg.iv, encryptedMsg.data);
-      const msg = JSON.parse(json);
-
-      // Don't echo TG-originated messages back to Telegram
-      if (msg.fromTelegram) continue;
-
-      let outText;
-      if (msg.type === 'text' && msg.text) {
-        outText = `💬 ${msg.nick}: ${msg.text}`;
-      } else if (msg.type === 'image') {
-        outText = `🖼 ${msg.nick} sent an image`;
-      } else if (msg.type === 'voice') {
-        outText = `🎤 ${msg.nick} sent a voice message`;
-      } else if (msg.type === 'file') {
-        outText = `📎 ${msg.nick} sent a file${msg.file?.name ? ': ' + msg.file.name : ''}`;
-      } else {
-        continue; // skip system, ai_command, ai_response, etc.
-      }
-
       await bot.sendMessage(chatId, outText);
+      console.log('[Telegram] Forwarded Echo→TG:', outText.slice(0, 80));
     } catch (e) {
-      // Decryption failure = wrong key or message not for this bridge — silently skip
-      if (!e.message?.includes('Unsupported state')) {
-        console.error('[Telegram] Forward error:', e.message);
-      }
+      console.error('[Telegram] sendMessage failed:', e.message);
     }
+  }
+
+  if (!matched) {
+    console.log('[Telegram] No bridge found for roomId:', roomId.slice(0, 8) + '...');
   }
 }
