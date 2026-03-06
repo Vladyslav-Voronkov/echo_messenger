@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
 import multer from 'multer';
+import { initTelegram, forwardToTelegram } from './telegram.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -384,6 +385,25 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e6, // 1MB — socket messages are text only now
 });
 
+// ── Telegram bridge helpers ───────────────────────────────────────────────────
+
+async function appendToRoom(roomId, storedMsg) {
+  const line = JSON.stringify(storedMsg);
+  const filePath = path.join(CHATS_DIR, `${roomId}.txt`);
+  await fs.appendFile(filePath, line + '\n', 'utf8');
+}
+
+function broadcastToRoom(roomId, storedMsg) {
+  io.to(roomId).emit('message', { encrypted: storedMsg });
+}
+
+await initTelegram({
+  token: process.env.TELEGRAM_BOT_TOKEN,
+  dataDir: DATA_DIR,
+  appendToRoom,
+  broadcastToRoom,
+});
+
 // ── Room member helpers ──────────────────────────────────────────────────────
 
 function addMember(roomId, encNick, socketId) {
@@ -485,6 +505,9 @@ io.on('connection', (socket) => {
     }
 
     io.to(roomId).emit('message', { encrypted });
+
+    // Forward to linked Telegram chat (if any)
+    forwardToTelegram(roomId, encrypted).catch(() => {});
   });
 
   socket.on('typing', ({ roomId, nick }) => {
