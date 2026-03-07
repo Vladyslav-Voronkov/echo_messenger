@@ -1,52 +1,45 @@
-import { useState, useEffect, useCallback, useRef, createPortal } from 'react';
+import { useState, useLayoutEffect, useEffect, useCallback, createPortal } from 'react';
 
 const MAX_ALBUM = 10;
 
 // ── AlbumComposer ─────────────────────────────────────────────────────────────
 //
-// Design decisions to handle React StrictMode correctly:
+// Blob URL lifecycle (StrictMode-safe):
 //
-// 1. State holds only File objects (fileList), NOT blob URLs.
-//    Blob URLs are computed lazily at render time via a Map stored in a ref.
+// · State holds only File objects (fileList), never blob URLs.
 //
-// 2. The blob URL Map (urlsRef) is populated during rendering and cleared in the
-//    useEffect cleanup. Because the Map lives in a ref (not state), React's
-//    Strict Mode "simulated unmount + remount" cycle works correctly:
-//    cleanup clears the Map → next render repopulates it with fresh URLs.
+// · Blob URLs live in the `previews` state array and are created/revoked
+//   exclusively inside a useLayoutEffect([fileList]):
+//   - useLayoutEffect is synchronous — URLs exist before the first browser
+//     paint, so the photo grid is never visibly empty.
+//   - Cleanup revokes all current URLs whenever fileList changes or the
+//     component unmounts.
+//   - In React StrictMode (dev) the simulated unmount calls the cleanup
+//     (revokes URLs) and the simulated remount immediately re-runs the effect
+//     (creates fresh URLs, calls setPreviews → re-render) — all before the
+//     next paint, so no broken-image flash ever appears.
 //
-// 3. The auto-close guard is trivial: fileList starts populated (lazy useState
-//    initialiser), so the effect never fires on the first render.
+// · The auto-close guard is safe: fileList starts populated (lazy useState
+//   initialiser), so the condition is always false on the first render.
 
 export default function AlbumComposer({ files, onSend, onCancel }) {
-  // fileList contains the selected File objects. Initialised synchronously so
-  // the auto-close guard (which checks fileList.length) never fires on mount.
+  // fileList: File[] — initialised synchronously so auto-close never fires on mount.
   const [fileList, setFileList] = useState(() =>
     Array.from(files).slice(0, MAX_ALBUM)
   );
   const [caption, setCaption] = useState('');
 
-  // Map: File → blob URL. Lives in a ref so it survives re-renders but is
-  // also cleared by the useEffect cleanup (which React runs on every unmount,
-  // including Strict Mode's simulated one).
-  const urlsRef = useRef(new Map());
+  // previews: [{ file, url }] — rebuilt whenever fileList changes.
+  const [previews, setPreviews] = useState([]);
 
-  // Lazily create and cache a blob URL for each File.
-  // Called during render — safe because the Map makes it idempotent.
-  const getBlobUrl = useCallback((file) => {
-    if (!urlsRef.current.has(file)) {
-      urlsRef.current.set(file, URL.createObjectURL(file));
-    }
-    return urlsRef.current.get(file);
-  }, []);
-
-  // Revoke all blob URLs when the component unmounts (or on Strict Mode's
-  // simulated unmount, after which getBlobUrl will recreate them on remount).
-  useEffect(() => {
-    return () => {
-      urlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-      urlsRef.current.clear();
-    };
-  }, []);
+  // Create blob URLs synchronously before first paint; revoke on cleanup.
+  // StrictMode: cleanup revokes → remount re-creates (via setPreviews re-render)
+  // all before the next paint → no broken images.
+  useLayoutEffect(() => {
+    const items = fileList.map(file => ({ file, url: URL.createObjectURL(file) }));
+    setPreviews(items);
+    return () => items.forEach(({ url }) => URL.revokeObjectURL(url));
+  }, [fileList]);
 
   // Close on Escape
   useEffect(() => {
@@ -56,18 +49,15 @@ export default function AlbumComposer({ files, onSend, onCancel }) {
   }, [onCancel]);
 
   // Auto-close when user removes ALL photos.
-  // This is safe: fileList starts populated, so the condition is false on mount.
+  // Safe: fileList starts populated, so condition is false on mount.
   useEffect(() => {
     if (fileList.length === 0 && files.length > 0) onCancel();
   }, [fileList.length, files.length, onCancel]);
 
   const removeAt = useCallback((idx) => {
-    setFileList((prev) => {
-      const removed = prev[idx];
-      const url = urlsRef.current.get(removed);
-      if (url) { URL.revokeObjectURL(url); urlsRef.current.delete(removed); }
-      return prev.filter((_, i) => i !== idx);
-    });
+    // useLayoutEffect([fileList]) handles URL cleanup automatically when
+    // fileList changes — no manual revocation needed here.
+    setFileList(prev => prev.filter((_, i) => i !== idx));
   }, []);
 
   const handleSend = useCallback(() => {
@@ -75,12 +65,11 @@ export default function AlbumComposer({ files, onSend, onCancel }) {
     onSend(fileList, caption.trim()); // pass File objects directly
   }, [fileList, caption, onSend]);
 
-  if (!fileList.length) return null;
+  // useLayoutEffect runs before paint, so this null is never visible to user.
+  if (!previews.length) return null;
 
-  // Build previews at render time using the cached URL map
-  const previews  = fileList.map((file) => ({ file, url: getBlobUrl(file) }));
-  const single    = previews.length === 1;
-  const gridCols  = previews.length === 1 ? 1 : previews.length === 2 ? 2 : 3;
+  const single   = previews.length === 1;
+  const gridCols = single ? 1 : previews.length === 2 ? 2 : 3;
 
   return createPortal(
     <div className="album-composer-overlay" onClick={onCancel}>
