@@ -68,7 +68,13 @@ function RemoteImageMessage({ imageData, cryptoKey, roomId }) {
   const blobUrlRef = useRef(null);
   const handleClose = useCallback(() => setEnlarged(false), []);
 
-  useEffect(() => () => { if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current); }, []);
+  // Revoke the final blob URL only when the component truly unmounts.
+  // Kept separate so React StrictMode's simulated unmount/remount does not
+  // prematurely revoke a URL that is still being displayed: the download
+  // effect re-runs on StrictMode remount and produces a fresh URL.
+  useEffect(() => {
+    return () => { if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!fileId || !cryptoKey) return;
@@ -100,6 +106,8 @@ function RemoteImageMessage({ imageData, cryptoKey, roomId }) {
 
         const blob = new Blob([plainBuf], { type: mime || 'image/jpeg' });
         const url = URL.createObjectURL(blob);
+        // Revoke previous URL only when a replacement is ready
+        if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
         blobUrlRef.current = url;
         setSrc(url);
         setLoading(false);
@@ -110,6 +118,8 @@ function RemoteImageMessage({ imageData, cryptoKey, roomId }) {
     }
 
     load();
+    // Only cancel the in-flight XHR — do NOT revoke the blob URL here because
+    // the UI may still be displaying it (e.g., StrictMode remount).
     return () => { cancelled = true; };
   }, [fileId, roomId, cryptoKey, mime]);
 

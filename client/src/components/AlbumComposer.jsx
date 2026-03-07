@@ -2,37 +2,50 @@ import { useState, useEffect, useCallback, useRef, createPortal } from 'react';
 
 const MAX_ALBUM = 10;
 
+// ── AlbumComposer ─────────────────────────────────────────────────────────────
+//
+// Design decisions to handle React StrictMode correctly:
+//
+// 1. State holds only File objects (fileList), NOT blob URLs.
+//    Blob URLs are computed lazily at render time via a Map stored in a ref.
+//
+// 2. The blob URL Map (urlsRef) is populated during rendering and cleared in the
+//    useEffect cleanup. Because the Map lives in a ref (not state), React's
+//    Strict Mode "simulated unmount + remount" cycle works correctly:
+//    cleanup clears the Map → next render repopulates it with fresh URLs.
+//
+// 3. The auto-close guard is trivial: fileList starts populated (lazy useState
+//    initialiser), so the effect never fires on the first render.
+
 export default function AlbumComposer({ files, onSend, onCancel }) {
-  // ── Initialise previews SYNCHRONOUSLY to avoid the race condition where the
-  //    auto-close effect fires before the populate effect's setState takes effect.
-  const [previews, setPreviews] = useState(() =>
-    Array.from(files).slice(0, MAX_ALBUM).map(file => ({
-      file,
-      url: URL.createObjectURL(file),
-    }))
+  // fileList contains the selected File objects. Initialised synchronously so
+  // the auto-close guard (which checks fileList.length) never fires on mount.
+  const [fileList, setFileList] = useState(() =>
+    Array.from(files).slice(0, MAX_ALBUM)
   );
   const [caption, setCaption] = useState('');
 
-  // Always keep a ref to the latest previews so the unmount cleanup can
-  // revoke whichever URLs are still alive at that moment.
-  const previewsRef = useRef(previews);
-  useEffect(() => {
-    previewsRef.current = previews;
-  });
+  // Map: File → blob URL. Lives in a ref so it survives re-renders but is
+  // also cleared by the useEffect cleanup (which React runs on every unmount,
+  // including Strict Mode's simulated one).
+  const urlsRef = useRef(new Map());
 
-  // Revoke remaining blob URLs when the component unmounts.
-  // (removeAt() already revokes each URL individually when the user removes a photo.)
-  useEffect(() => {
-    return () => previewsRef.current.forEach(p => {
-      try { URL.revokeObjectURL(p.url); } catch { /* ignore */ }
-    });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Lazily create and cache a blob URL for each File.
+  // Called during render — safe because the Map makes it idempotent.
+  const getBlobUrl = useCallback((file) => {
+    if (!urlsRef.current.has(file)) {
+      urlsRef.current.set(file, URL.createObjectURL(file));
+    }
+    return urlsRef.current.get(file);
+  }, []);
 
-  const removeAt = useCallback((idx) => {
-    setPreviews(prev => {
-      URL.revokeObjectURL(prev[idx].url);
-      return prev.filter((_, i) => i !== idx);
-    });
+  // Revoke all blob URLs when the component unmounts (or on Strict Mode's
+  // simulated unmount, after which getBlobUrl will recreate them on remount).
+  useEffect(() => {
+    return () => {
+      urlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      urlsRef.current.clear();
+    };
   }, []);
 
   // Close on Escape
@@ -42,29 +55,36 @@ export default function AlbumComposer({ files, onSend, onCancel }) {
     return () => window.removeEventListener('keydown', handler);
   }, [onCancel]);
 
-  // If the user removes ALL photos, close the composer.
-  // Because previews starts populated (synchronous init above), this effect
-  // will NOT fire on the first render — only when the user manually removes
-  // all photos.
+  // Auto-close when user removes ALL photos.
+  // This is safe: fileList starts populated, so the condition is false on mount.
   useEffect(() => {
-    if (previews.length === 0 && files.length > 0) onCancel();
-  }, [previews.length, files.length, onCancel]);
+    if (fileList.length === 0 && files.length > 0) onCancel();
+  }, [fileList.length, files.length, onCancel]);
+
+  const removeAt = useCallback((idx) => {
+    setFileList((prev) => {
+      const removed = prev[idx];
+      const url = urlsRef.current.get(removed);
+      if (url) { URL.revokeObjectURL(url); urlsRef.current.delete(removed); }
+      return prev.filter((_, i) => i !== idx);
+    });
+  }, []);
 
   const handleSend = useCallback(() => {
-    if (!previews.length) return;
-    onSend(previews.map(p => p.file), caption.trim());
-  }, [previews, caption, onSend]);
+    if (!fileList.length) return;
+    onSend(fileList, caption.trim()); // pass File objects directly
+  }, [fileList, caption, onSend]);
 
-  if (!previews.length) return null;
+  if (!fileList.length) return null;
 
-  const single = previews.length === 1;
-
-  // Grid columns: 1→1col, 2→2col, 3+→3col (wrap)
-  const gridCols = previews.length === 1 ? 1 : previews.length === 2 ? 2 : 3;
+  // Build previews at render time using the cached URL map
+  const previews  = fileList.map((file) => ({ file, url: getBlobUrl(file) }));
+  const single    = previews.length === 1;
+  const gridCols  = previews.length === 1 ? 1 : previews.length === 2 ? 2 : 3;
 
   return createPortal(
     <div className="album-composer-overlay" onClick={onCancel}>
-      <div className="album-composer" onClick={e => e.stopPropagation()}>
+      <div className="album-composer" onClick={(e) => e.stopPropagation()}>
 
         {/* ── Header ── */}
         <div className="album-composer-header">
@@ -80,7 +100,10 @@ export default function AlbumComposer({ files, onSend, onCancel }) {
           style={{ gridTemplateColumns: `repeat(${gridCols}, 1fr)` }}
         >
           {previews.map((p, i) => (
-            <div key={i} className={`album-composer-thumb${single ? ' album-composer-thumb-single' : ''}`}>
+            <div
+              key={i}
+              className={`album-composer-thumb${single ? ' album-composer-thumb-single' : ''}`}
+            >
               <img src={p.url} alt="" className="album-composer-img" draggable={false} />
               <button
                 className="album-composer-remove"
@@ -97,7 +120,7 @@ export default function AlbumComposer({ files, onSend, onCancel }) {
             className="album-composer-caption"
             placeholder="Добавить подпись…"
             value={caption}
-            onChange={e => setCaption(e.target.value)}
+            onChange={(e) => setCaption(e.target.value)}
             rows={2}
             maxLength={1024}
           />
@@ -109,7 +132,7 @@ export default function AlbumComposer({ files, onSend, onCancel }) {
           <button
             className="album-composer-send"
             onClick={handleSend}
-            disabled={!previews.length}
+            disabled={!fileList.length}
           >
             Отправить
           </button>

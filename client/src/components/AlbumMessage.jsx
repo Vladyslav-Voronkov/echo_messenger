@@ -4,10 +4,21 @@ import { decryptFileFromBinary } from '../utils/crypto.js';
 // ── Shared hook: load & decrypt one image from Echo storage ──────────────────
 
 function useDecryptedImage(fileId, mime, cryptoKey, roomId) {
-  const [src, setSrc]       = useState(null);
+  const [src, setSrc]         = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError]   = useState(false);
+  const [error, setError]     = useState(false);
   const blobRef = useRef(null);
+
+  // Revoke the final blob URL when the component truly unmounts.
+  // This is a SEPARATE effect so that React StrictMode's simulated
+  // unmount/remount does not prematurely revoke URLs that are still
+  // displayed: in dev StrictMode the download effect re-runs on remount and
+  // creates a fresh URL, while this cleanup only fires once on real unmount.
+  useEffect(() => {
+    return () => {
+      if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = null; }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!fileId || !cryptoKey) return;
@@ -33,6 +44,7 @@ function useDecryptedImage(fileId, mime, cryptoKey, roomId) {
 
         const blob = new Blob([plain], { type: mime || 'image/jpeg' });
         const url  = URL.createObjectURL(blob);
+        // Revoke the previous URL only when we have a replacement ready
         if (blobRef.current) URL.revokeObjectURL(blobRef.current);
         blobRef.current = url;
         setSrc(url);
@@ -42,10 +54,9 @@ function useDecryptedImage(fileId, mime, cryptoKey, roomId) {
       }
     })();
 
-    return () => {
-      cancelled = true;
-      if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = null; }
-    };
+    // Only cancel the in-flight XHR on cleanup — do NOT revoke the blob URL
+    // here because the UI may still be displaying it (e.g., StrictMode remount).
+    return () => { cancelled = true; };
   }, [fileId, mime, cryptoKey, roomId]);
 
   return { src, loading, error };
