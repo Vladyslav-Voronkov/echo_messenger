@@ -64,3 +64,31 @@ export function encryptNick(keyBuffer, nick) {
   const { iv, data } = encryptData(keyBuffer, nick);
   return `${iv}.${data}`;
 }
+
+/**
+ * Encrypt a binary Buffer → { iv: base64, encBuffer: Buffer(ciphertext+tag) }
+ * Matches client encryptFileToBinary() format exactly.
+ */
+export function encryptFileBinary(keyBuffer, inputBuffer) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', keyBuffer, iv);
+  const ciphertext = Buffer.concat([cipher.update(inputBuffer), cipher.final()]);
+  const tag = cipher.getAuthTag(); // 16 bytes
+  return {
+    iv: iv.toString('base64'),
+    encBuffer: Buffer.concat([ciphertext, tag]),
+  };
+}
+
+/**
+ * Decrypt a binary Buffer (ciphertext+tag from .enc file) → plain Buffer.
+ * Matches client decryptFileFromBinary() format exactly.
+ */
+export function decryptFileBinary(keyBuffer, ivBase64, encBuffer) {
+  const iv = Buffer.from(ivBase64, 'base64');
+  const tag = encBuffer.slice(-16);
+  const ciphertext = encBuffer.slice(0, -16);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuffer, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
