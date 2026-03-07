@@ -1360,6 +1360,12 @@ body {
   box-shadow: 0 24px 80px rgba(0,0,0,0.8);
 }
 
+.album-lb-error {
+  font-size: 56px;
+  color: rgba(255,255,255,0.6);
+  user-select: none;
+}
+
 .album-lb-nav {
   position: absolute;
   top: 50%;
@@ -2080,6 +2086,7 @@ body {
 
 .fullscreen-lightbox-body {
   flex: 1;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;

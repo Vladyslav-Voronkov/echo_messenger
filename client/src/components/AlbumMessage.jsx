@@ -59,7 +59,7 @@ function AlbumLightbox({ images, startIndex, cryptoKey, roomId, onClose }) {
   const prev = idx > 0             ? images[idx - 1] : null;
   const next = idx < images.length - 1 ? images[idx + 1] : null;
 
-  const { src, loading } = useDecryptedImage(cur.fileId,  cur.mime,  cryptoKey, roomId);
+  const { src, loading, error } = useDecryptedImage(cur.fileId,  cur.mime,  cryptoKey, roomId);
   // Eagerly preload adjacent images
   useDecryptedImage(prev?.fileId ?? null, prev?.mime ?? null, cryptoKey, roomId);
   useDecryptedImage(next?.fileId ?? null, next?.mime ?? null, cryptoKey, roomId);
@@ -108,6 +108,8 @@ function AlbumLightbox({ images, startIndex, cryptoKey, roomId, onClose }) {
 
         {loading ? (
           <span className="spinner album-lb-spinner" />
+        ) : error ? (
+          <span className="album-lb-error">🔒</span>
         ) : (
           <img
             src={src}

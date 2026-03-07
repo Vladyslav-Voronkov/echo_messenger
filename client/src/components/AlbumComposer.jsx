@@ -1,20 +1,32 @@
-import { useState, useEffect, useCallback, createPortal } from 'react';
+import { useState, useEffect, useCallback, useRef, createPortal } from 'react';
 
 const MAX_ALBUM = 10;
 
 export default function AlbumComposer({ files, onSend, onCancel }) {
-  const [previews, setPreviews] = useState([]);   // [{ file, url }]
-  const [caption, setCaption]   = useState('');
-
-  // Build preview URLs on mount / when files change
-  useEffect(() => {
-    const items = Array.from(files).slice(0, MAX_ALBUM).map(file => ({
+  // ── Initialise previews SYNCHRONOUSLY to avoid the race condition where the
+  //    auto-close effect fires before the populate effect's setState takes effect.
+  const [previews, setPreviews] = useState(() =>
+    Array.from(files).slice(0, MAX_ALBUM).map(file => ({
       file,
       url: URL.createObjectURL(file),
-    }));
-    setPreviews(items);
-    return () => items.forEach(i => URL.revokeObjectURL(i.url));
-  }, [files]);
+    }))
+  );
+  const [caption, setCaption] = useState('');
+
+  // Always keep a ref to the latest previews so the unmount cleanup can
+  // revoke whichever URLs are still alive at that moment.
+  const previewsRef = useRef(previews);
+  useEffect(() => {
+    previewsRef.current = previews;
+  });
+
+  // Revoke remaining blob URLs when the component unmounts.
+  // (removeAt() already revokes each URL individually when the user removes a photo.)
+  useEffect(() => {
+    return () => previewsRef.current.forEach(p => {
+      try { URL.revokeObjectURL(p.url); } catch { /* ignore */ }
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const removeAt = useCallback((idx) => {
     setPreviews(prev => {
@@ -30,7 +42,10 @@ export default function AlbumComposer({ files, onSend, onCancel }) {
     return () => window.removeEventListener('keydown', handler);
   }, [onCancel]);
 
-  // If all photos removed, close
+  // If the user removes ALL photos, close the composer.
+  // Because previews starts populated (synchronous init above), this effect
+  // will NOT fire on the first render — only when the user manually removes
+  // all photos.
   useEffect(() => {
     if (previews.length === 0 && files.length > 0) onCancel();
   }, [previews.length, files.length, onCancel]);
