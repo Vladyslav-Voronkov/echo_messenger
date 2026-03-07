@@ -181,53 +181,44 @@ export async function initTelegram({ token, dataDir, appendToRoom, broadcastToRo
 export async function forwardToTelegram(roomId, encryptedMsg) {
   if (!bot) return;
 
-  let matched = false;
   for (const [chatId, bridge] of Object.entries(bridges)) {
     if (bridge.roomId !== roomId || !bridge.key) continue;
-    matched = true;
-
-    let json;
-    try {
-      json = decryptData(bridge.key, encryptedMsg.iv, encryptedMsg.data);
-    } catch (e) {
-      console.error('[Telegram] Decrypt failed (Echo→TG):', e.message);
-      continue;
-    }
-
-    let msg;
-    try {
-      msg = JSON.parse(json);
-    } catch (e) {
-      console.error('[Telegram] JSON parse failed:', e.message, '| raw:', json?.slice(0, 100));
-      continue;
-    }
-
-    // Don't echo TG-originated messages back to Telegram
-    if (msg.fromTelegram) continue;
-
-    let outText;
-    if (msg.type === 'text' && msg.text) {
-      outText = `💬 ${msg.nick}: ${msg.text}`;
-    } else if (msg.type === 'image') {
-      outText = `🖼 ${msg.nick} sent an image`;
-    } else if (msg.type === 'voice') {
-      outText = `🎤 ${msg.nick} sent a voice message`;
-    } else if (msg.type === 'file') {
-      outText = `📎 ${msg.nick} sent a file${msg.file?.name ? ': ' + msg.file.name : ''}`;
-    } else {
-      console.log('[Telegram] Skipping message type:', msg.type);
-      continue;
-    }
 
     try {
+      // Decrypt nick — used for display and loop prevention
+      const [nickIv, nickData] = encryptedMsg.nick.split('.');
+      const senderNick = decryptData(bridge.key, nickIv, nickData);
+
+      // Skip messages that came FROM Telegram (prevents echo loop)
+      if (senderNick.includes('[TG]')) continue;
+
+      // Decrypt the message payload (plain text from Echo client)
+      const payload = decryptData(bridge.key, encryptedMsg.iv, encryptedMsg.data);
+
+      // payload may be plain text or JSON (depends on message type)
+      let outText;
+      try {
+        const parsed = JSON.parse(payload);
+        if (parsed.type === 'image') {
+          outText = `🖼 ${senderNick} sent an image`;
+        } else if (parsed.type === 'voice') {
+          outText = `🎤 ${senderNick} sent a voice message`;
+        } else if (parsed.type === 'file') {
+          outText = `📎 ${senderNick} sent a file${parsed.file?.name ? ': ' + parsed.file.name : ''}`;
+        } else if (parsed.text) {
+          outText = `💬 ${senderNick}: ${parsed.text}`;
+        } else {
+          continue; // system/ai messages — skip
+        }
+      } catch {
+        // Plain text message (standard Echo format)
+        if (!payload.trim()) continue;
+        outText = `💬 ${senderNick}: ${payload}`;
+      }
+
       await bot.sendMessage(chatId, outText);
-      console.log('[Telegram] Forwarded Echo→TG:', outText.slice(0, 80));
     } catch (e) {
-      console.error('[Telegram] sendMessage failed:', e.message);
+      console.error('[Telegram] Forward error:', e.message);
     }
-  }
-
-  if (!matched) {
-    console.log('[Telegram] No bridge found for roomId:', roomId.slice(0, 8) + '...');
   }
 }
