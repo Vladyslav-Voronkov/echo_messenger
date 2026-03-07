@@ -12,8 +12,13 @@
   --accent-dim:    rgba(79, 142, 247, 0.15);
 
   --text:          #eeeef5;
+  --text-1:        #eeeef5;
   --text-2:        #8888a8;
   --text-3:        #50506a;
+
+  --surface-1:     #111120;
+  --surface-2:     rgba(255, 255, 255, 0.06);
+  --surface-3:     rgba(255, 255, 255, 0.11);
 
   --green:         #22c55e;
   --red:           #ef4444;
