@@ -1,4 +1,5 @@
-import { useState, useLayoutEffect, useEffect, useCallback, createPortal } from 'react';
+import { useState, useLayoutEffect, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
 const MAX_ALBUM = 10;
 

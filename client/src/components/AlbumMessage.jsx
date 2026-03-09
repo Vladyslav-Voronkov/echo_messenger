@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback, createPortal } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { decryptFileFromBinary } from '../utils/crypto.js';
 
 // ── Shared hook: load & decrypt one image from Echo storage ──────────────────
