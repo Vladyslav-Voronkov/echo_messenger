@@ -58,7 +58,7 @@ function buildAIContext(messages, query) {
       let text = msg.text;
       try {
         const p = JSON.parse(msg.text);
-        if (p.type === 'image' || p.type === 'file' || p.type === 'voice') { i++; continue; }
+        if (p.type === 'image' || p.type === 'album' || p.type === 'file' || p.type === 'voice') { i++; continue; }
         if (typeof p.text === 'string') text = p.text;
       } catch { /* plain text */ }
       if (text && text.trim()) chatLines.push(`${msg.nick}: ${text}`);
@@ -393,6 +393,7 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
         try {
           const parsed = JSON.parse(notifText);
           if (parsed.type === 'image') notifText = t('chat.notif_photo');
+          else if (parsed.type === 'album') notifText = t('chat.notif_album').replace('{n}', parsed.album?.images?.length ?? '');
           else if (parsed.type === 'file') notifText = t('chat.notif_file') + ' ' + (parsed.file?.name || '');
           else if (parsed.type === 'voice') notifText = t('chat.notif_voice');
           else if (typeof parsed.text === 'string') notifText = parsed.text;

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import ImageMessage from './ImageMessage.jsx';
+import AlbumMessage from './AlbumMessage.jsx';
 import FileMessage from './FileMessage.jsx';
 import VoiceMessage from './VoiceMessage.jsx';
 import { getNickColor } from '../utils/nickColor.js';
@@ -9,7 +10,10 @@ function parseMessage(raw) {
   try {
     const parsed = JSON.parse(raw);
     if (parsed && parsed.type === 'image' && parsed.image) {
-      return { type: 'image', imageData: parsed.image, replyTo: null };
+      return { type: 'image', imageData: { ...parsed.image, caption: parsed.caption || null }, replyTo: null };
+    }
+    if (parsed && parsed.type === 'album' && parsed.album) {
+      return { type: 'album', albumData: parsed.album, replyTo: null };
     }
     if (parsed && parsed.type === 'file' && parsed.file) {
       return { type: 'file', fileData: parsed.file, replyTo: null };
@@ -136,11 +140,13 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
   const handleReplyClick = () => {
     const replyText = parsed.type === 'image'
       ? t('msg.photo')
-      : parsed.type === 'file'
-        ? (parsed.fileData && parsed.fileData.name ? parsed.fileData.name : t('msg.file'))
-        : parsed.type === 'voice'
-          ? t('msg.voice')
-          : (parsed.text || message.text);
+      : parsed.type === 'album'
+        ? `📷 ${parsed.albumData?.images?.length ?? ''} ${t('msg.photo').toLowerCase()}`
+        : parsed.type === 'file'
+          ? (parsed.fileData && parsed.fileData.name ? parsed.fileData.name : t('msg.file'))
+          : parsed.type === 'voice'
+            ? t('msg.voice')
+            : (parsed.text || message.text);
     onReply({ id: message.id, nick, text: replyText });
   };
 
@@ -205,7 +211,14 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
         )}
 
         {parsed.type === 'image' ? (
-          <ImageMessage imageData={parsed.imageData} cryptoKey={cryptoKey} roomId={roomId} />
+          <>
+            <ImageMessage imageData={parsed.imageData} cryptoKey={cryptoKey} roomId={roomId} />
+            {parsed.imageData?.caption && (
+              <p className="message-text album-caption-inline">{parsed.imageData.caption}</p>
+            )}
+          </>
+        ) : parsed.type === 'album' ? (
+          <AlbumMessage albumData={parsed.albumData} cryptoKey={cryptoKey} roomId={roomId} />
         ) : parsed.type === 'file' ? (
           <FileMessage fileData={parsed.fileData} cryptoKey={cryptoKey} roomId={roomId} />
         ) : parsed.type === 'voice' ? (

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import EmojiPicker from './EmojiPicker.jsx';
 import PdfTools from './PdfTools.jsx';
+import AlbumComposer from './AlbumComposer.jsx';
 import { encryptNick, encryptMessage, encryptFileToBinary } from '../utils/crypto.js';
 import { useTranslation, interpolate } from '../utils/i18n.jsx';
 
@@ -22,6 +23,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [imgLoading, setImgLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null); // null | { pct: 0-100, label: string }
+  const [albumDraft, setAlbumDraft] = useState(null); // File[] | null
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [cancelRecord, setCancelRecord] = useState(false);
@@ -110,64 +112,91 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
     });
   }, []);
 
-  const handleImageSelect = useCallback(async (e) => {
-    const file = e.target.files[0];
+  // Open the album composer (preview + caption) for selected images
+  const handleImageSelect = useCallback((e) => {
+    const files = Array.from(e.target.files);
     e.target.value = '';
-    if (!file) return;
-    if (!file.type.startsWith('image/')) { alert(t('input.err_img_type')); return; }
-    if (file.size > MAX_IMAGE_SIZE) { alert(t('input.err_img_size')); return; }
+    if (!files.length) return;
 
+    const valid = files
+      .filter(f => f.type.startsWith('image/') && f.size <= MAX_IMAGE_SIZE)
+      .slice(0, 10);
+
+    if (!valid.length) { alert(t('input.err_img_type')); return; }
+    setAlbumDraft(valid);
+  }, [t]);
+
+  // Upload all images and send as album (or single image with optional caption)
+  const handleSendAlbum = useCallback(async (files, caption) => {
+    setAlbumDraft(null);
     setImgLoading(true);
-    setUploadProgress({ pct: 0, label: t('input.progress_reading') });
+    setUploadProgress({ pct: 0, label: t('input.progress_encrypting') });
+
     try {
-      const arrayBuffer = await file.arrayBuffer();
-
-      // Encrypt to binary blob (same approach as regular files)
-      setUploadProgress({ pct: 5, label: t('input.progress_encrypting') });
-      const { iv, blob: encBlob } = await encryptFileToBinary(cryptoKey, arrayBuffer);
       const encNick = await encryptNick(cryptoKey, nickname);
+      const uploaded = [];
 
-      // Upload via XHR with progress
-      setUploadProgress({ pct: 10, label: interpolate(t('input.progress_uploading'), { pct: 0 }) });
-      const formData = new FormData();
-      formData.append('file', encBlob, 'encrypted.bin');
-      const meta = JSON.stringify({
-        iv, nick: encNick,
-        name: file.name, mime: file.type, size: file.size, ts: Date.now(),
-      });
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setUploadProgress({
+          pct: Math.round((i / files.length) * 90),
+          label: files.length > 1
+            ? `Фото ${i + 1} из ${files.length}…`
+            : interpolate(t('input.progress_uploading'), { pct: 0 }),
+        });
 
-      const fileId = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/upload/' + roomId);
-        xhr.setRequestHeader('x-file-meta', meta);
-        xhr.upload.onprogress = (ev) => {
-          if (ev.lengthComputable) {
-            const pct = Math.round(10 + (ev.loaded / ev.total) * 88);
-            setUploadProgress({ pct, label: interpolate(t('input.progress_uploading'), { pct: Math.round((ev.loaded / ev.total) * 100) }) });
-          }
-        };
-        xhr.onload = () => {
-          if (xhr.status === 200) {
-            try { resolve(JSON.parse(xhr.responseText).fileId); }
-            catch { reject(new Error('Bad server response')); }
-          } else reject(new Error('Upload failed: ' + xhr.status));
-        };
-        xhr.onerror = () => reject(new Error('Network error'));
-        xhr.send(formData);
-      });
+        const arrayBuffer = await file.arrayBuffer();
+        const { iv, blob: encBlob } = await encryptFileToBinary(cryptoKey, arrayBuffer);
 
-      // Send small socket message referencing the uploaded image
-      setUploadProgress({ pct: 99, label: t('input.progress_sending') });
-      const payload = JSON.stringify({ type: 'image', image: { fileId, mime: file.type, size: file.size } });
+        const meta = JSON.stringify({
+          iv, nick: encNick,
+          name: file.name, mime: file.type, size: file.size, ts: Date.now() + i,
+        });
+
+        const formData = new FormData();
+        formData.append('file', encBlob, 'encrypted.bin');
+
+        const fileId = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', '/upload/' + roomId);
+          xhr.setRequestHeader('x-file-meta', meta);
+          xhr.upload.onprogress = (ev) => {
+            if (ev.lengthComputable && files.length === 1) {
+              const pct = Math.round(10 + (ev.loaded / ev.total) * 80);
+              setUploadProgress({ pct, label: interpolate(t('input.progress_uploading'), { pct: Math.round((ev.loaded / ev.total) * 100) }) });
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status === 200) {
+              try { resolve(JSON.parse(xhr.responseText).fileId); }
+              catch { reject(new Error('Bad server response')); }
+            } else reject(new Error('Upload failed: ' + xhr.status));
+          };
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.send(formData);
+        });
+
+        uploaded.push({ fileId, mime: file.type, size: file.size });
+      }
+
+      setUploadProgress({ pct: 95, label: t('input.progress_sending') });
+
+      // Build payload: single image OR album
+      const payload = uploaded.length === 1
+        ? JSON.stringify({ type: 'image', image: uploaded[0], caption: caption || undefined })
+        : JSON.stringify({ type: 'album', album: { images: uploaded, caption: caption || '' } });
+
+      const encNick2 = await encryptNick(cryptoKey, nickname);
       const { iv: msgIv, data: msgData } = await encryptMessage(cryptoKey, payload);
       socketRef.current.emit('message', {
         roomId,
-        encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick },
+        encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick2 },
       });
+
       setUploadProgress({ pct: 100, label: t('input.progress_done') });
       setTimeout(() => setUploadProgress(null), 800);
     } catch (err) {
-      console.error('Image send error:', err);
+      console.error('Album send error:', err);
       setUploadProgress(null);
       alert(t('input.err_img_send') + err.message);
     } finally {
@@ -443,8 +472,17 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
       )}
 
       {/* Hidden file inputs */}
-      <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: 'none' }} />
+      <input ref={imageInputRef} type="file" accept="image/*" multiple onChange={handleImageSelect} style={{ display: 'none' }} />
       <input ref={fileInputRef} type="file" accept="*/*" onChange={handleFileSelect} style={{ display: 'none' }} />
+
+      {/* Album composer (pre-send preview with caption) */}
+      {albumDraft && (
+        <AlbumComposer
+          files={albumDraft}
+          onSend={handleSendAlbum}
+          onCancel={() => setAlbumDraft(null)}
+        />
+      )}
 
       {/* ── Modern pill input bar ── */}
       <div className="input-bar">
