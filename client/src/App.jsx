@@ -1,11 +1,13 @@
-import { useState, useCallback } from 'react';
-import AuthScreen from './components/AuthScreen.jsx';
-import RoomScreen from './components/RoomScreen.jsx';
-import ChatScreen from './components/ChatScreen.jsx';
+import { useState, useCallback, useEffect } from 'react';
+import AuthScreen    from './components/AuthScreen.jsx';
+import ChatScreen    from './components/ChatScreen.jsx';
+import Sidebar       from './components/Sidebar.jsx';
+import NewChatModal  from './components/NewChatModal.jsx';
 import { deriveRoomId, deriveKey } from './utils/crypto.js';
-import { LangProvider, useTranslation } from './utils/i18n.jsx';
+import { LangProvider } from './utils/i18n.jsx';
 
 const SESSION_KEY = 'echo_session';
+const CHATS_KEY   = 'echo_chats';
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 function loadSavedSession() {
@@ -19,85 +21,188 @@ function loadSavedSession() {
       return null;
     }
     return parsed;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-/**
- * Phases:
- *   'auth'     — account screen (register / login)
- *   'room'     — enter channel key (seed phrase)
- *   'deriving' — PBKDF2 key derivation running
- *   'chat'     — active encrypted chat
- */
-function AppInner() {
-  const { t } = useTranslation();
-  // Lazy initializers: read localStorage once on mount
-  const [phase, setPhase] = useState(() => loadSavedSession() ? 'room' : 'auth');
-  const [account, setAccount] = useState(() => loadSavedSession());
-  const [session, setSession] = useState(null);
-  const [error, setError] = useState('');
+function loadChats() {
+  try { return JSON.parse(localStorage.getItem(CHATS_KEY) || '[]'); }
+  catch { return []; }
+}
 
+function AppInner() {
+  const [account,       setAccount]       = useState(loadSavedSession);
+  const [chatList,      setChatList]       = useState(loadChats);
+  const [activeChatId,  setActiveChatId]   = useState(null);
+  const [activeSession, setActiveSession]  = useState(null);
+  const [showNewChat,   setShowNewChat]    = useState(false);
+  const [derivingId,    setDerivingId]     = useState(null); // chatId currently being derived
+  const [deriveError,   setDeriveError]    = useState('');
+  const [showSidebar,   setShowSidebar]    = useState(true); // mobile toggle
+
+  // Persist chat list to localStorage on every change
+  useEffect(() => {
+    localStorage.setItem(CHATS_KEY, JSON.stringify(chatList));
+  }, [chatList]);
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
   const handleAuth = useCallback((accountData) => {
-    // Save session for 30 days (nickname only, never password)
     const toSave = { ...accountData, expiresAt: Date.now() + SESSION_TTL };
     localStorage.setItem(SESSION_KEY, JSON.stringify(toSave));
     setAccount(accountData);
-    setPhase('room');
-  }, []);
-
-  const handleRoomJoin = useCallback(async ({ seedPhrase }) => {
-    setPhase('deriving');
-    setError('');
-    try {
-      const [roomId, cryptoKey] = await Promise.all([
-        deriveRoomId(seedPhrase),
-        deriveKey(seedPhrase),
-      ]);
-      setSession({ nickname: account.nickname, roomId, cryptoKey });
-      setPhase('chat');
-    } catch (err) {
-      console.error(err);
-      setError(t('app.key_error'));
-      setPhase('room');
-    }
-  }, [account, t]);
-
-  const handleLeaveRoom = useCallback(() => {
-    setSession(null);
-    setPhase('room');
   }, []);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem(SESSION_KEY);
     setAccount(null);
-    setSession(null);
-    setPhase('auth');
+    setActiveSession(null);
+    setActiveChatId(null);
   }, []);
 
-  if (phase === 'auth') {
+  // ── Open a chat (derive keys + activate) ──────────────────────────────────
+  const deriveAndOpen = useCallback(async (chat, nickname) => {
+    setDerivingId(chat.id);
+    setDeriveError('');
+    try {
+      const [roomId, cryptoKey] = await Promise.all([
+        deriveRoomId(chat.seedPhrase),
+        deriveKey(chat.seedPhrase),
+      ]);
+      setActiveSession({ nickname: nickname || account?.nickname, roomId, cryptoKey, chatId: chat.id });
+      setActiveChatId(chat.id);
+      setDerivingId(null);
+      setShowSidebar(false); // collapse sidebar on mobile after selecting
+    } catch {
+      setDeriveError('Ошибка ключа');
+      setDerivingId(null);
+    }
+  }, [account]);
+
+  const handleSelectChat = useCallback((chat) => {
+    if (chat.id === activeChatId) {
+      setShowSidebar(false);
+      return;
+    }
+    deriveAndOpen(chat, account?.nickname);
+  }, [activeChatId, deriveAndOpen, account]);
+
+  // ── Create / join new chat ────────────────────────────────────────────────
+  const handleNewChat = useCallback(async ({ seedPhrase, name }) => {
+    setDerivingId('__new__');
+    setDeriveError('');
+    try {
+      const [roomId, cryptoKey] = await Promise.all([
+        deriveRoomId(seedPhrase),
+        deriveKey(seedPhrase),
+      ]);
+
+      // Reuse if same key already saved
+      let target = null;
+      setChatList(prev => {
+        const existing = prev.find(c => c.roomId === roomId);
+        if (existing) { target = existing; return prev; }
+        const newChat = {
+          id:          'chat-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+          seedPhrase,
+          roomId,
+          name:        name || 'Чат',
+          lastMessage: '',
+          lastTs:      null,
+          unread:      0,
+          addedAt:     Date.now(),
+        };
+        target = newChat;
+        return [newChat, ...prev];
+      });
+
+      if (target) {
+        setActiveSession({ nickname: account?.nickname, roomId, cryptoKey, chatId: target.id });
+        setActiveChatId(target.id);
+      }
+      setShowNewChat(false);
+      setDerivingId(null);
+      setShowSidebar(false);
+    } catch {
+      setDeriveError('Ошибка ключа');
+      setDerivingId(null);
+    }
+  }, [account]);
+
+  // ── Sidebar preview update (called from ChatScreen on new messages) ────────
+  const handleUpdateChat = useCallback((chatId, { lastMessage, lastTs }) => {
+    setChatList(prev => prev.map(c =>
+      c.id === chatId ? { ...c, lastMessage, lastTs, unread: 0 } : c
+    ));
+  }, []);
+
+  // ── Auth screen ───────────────────────────────────────────────────────────
+  if (!account) {
     return <AuthScreen onAuth={handleAuth} />;
   }
 
-  if (phase === 'room' || phase === 'deriving') {
-    return (
-      <RoomScreen
-        account={account}
-        onJoin={handleRoomJoin}
-        onLogout={handleLogout}
-        isLoading={phase === 'deriving'}
-        error={error}
-      />
-    );
-  }
+  const activeChat = chatList.find(c => c.id === activeChatId);
 
   return (
-    <ChatScreen
-      session={session}
-      onLeaveRoom={handleLeaveRoom}
-      onLogout={handleLogout}
-    />
+    <div className="app-layout">
+
+      {/* ── Sidebar wrapper (mobile: off-canvas) ── */}
+      <div className={'sidebar-wrapper' + (showSidebar ? ' sidebar-wrapper--open' : '')}>
+        <Sidebar
+          account={account}
+          chatList={chatList}
+          activeChatId={activeChatId}
+          onSelectChat={handleSelectChat}
+          onNewChat={() => { setDeriveError(''); setShowNewChat(true); }}
+          onLogout={handleLogout}
+          derivingId={derivingId}
+        />
+      </div>
+
+      {/* Mobile overlay — tap to close sidebar */}
+      {showSidebar && (
+        <div className="sidebar-overlay" onClick={() => setShowSidebar(false)} />
+      )}
+
+      {/* ── Main area ── */}
+      <div className="app-main">
+        {activeSession ? (
+          <ChatScreen
+            key={activeSession.chatId}
+            session={activeSession}
+            chatName={activeChat?.name}
+            onLeaveRoom={() => { setActiveChatId(null); setActiveSession(null); setShowSidebar(true); }}
+            onLogout={handleLogout}
+            onUpdateChat={handleUpdateChat}
+            onToggleSidebar={() => setShowSidebar(v => !v)}
+          />
+        ) : (
+          <div className="app-welcome">
+            <div className="app-welcome-inner">
+              <div className="app-welcome-logo">EM</div>
+              <h2 className="app-welcome-title">Echo Messenger</h2>
+              <p className="app-welcome-sub">Выберите чат или создайте новый</p>
+              <button
+                className="login-btn"
+                onClick={() => { setDeriveError(''); setShowNewChat(true); }}
+                style={{ width: 'auto', paddingLeft: 28, paddingRight: 28 }}
+              >
+                ✏️ Новый чат
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── New chat modal ── */}
+      {showNewChat && (
+        <NewChatModal
+          onJoin={handleNewChat}
+          onClose={() => { setShowNewChat(false); setDeriveError(''); }}
+          isLoading={derivingId === '__new__'}
+          error={deriveError}
+        />
+      )}
+
+    </div>
   );
 }
 

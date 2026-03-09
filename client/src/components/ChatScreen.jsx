@@ -141,7 +141,7 @@ const IconWarning = () => (
   </svg>
 );
 
-export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
+export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, onUpdateChat, onToggleSidebar }) {
   const { nickname, roomId, cryptoKey } = session;
   const { t } = useTranslation();
   const [messages, setMessages] = useState([]);
@@ -183,7 +183,9 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
   const showScrollBtnRef = useRef(false);
 
   // Nick color for own avatar in header
-  const ownNickColor = getNickColor(nickname);
+  const ownNickColor    = getNickColor(nickname);
+  // Avatar color for the current chat (shown in header)
+  const chatAvatarColor = getNickColor(chatName || 'E');
 
   // Reset visible window and scroll flag when room changes
   useEffect(() => {
@@ -231,6 +233,15 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
       Notification.requestPermission();
     }
   }, []);
+
+  // Update sidebar preview with the last real message whenever messages change
+  useEffect(() => {
+    if (!messages.length || !onUpdateChat) return;
+    const lastReal = [...messages].reverse().find(m => m.type !== 'system' && !m.generating);
+    if (!lastReal) return;
+    onUpdateChat(session.chatId, { lastMessage: lastReal.text || '', lastTs: lastReal.ts });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
 
   // Track join/leave events for suspicious activity detection
   const recordActivityEvent = useCallback(() => {
@@ -719,12 +730,21 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
 
       {/* ── Modern Chat Header ── */}
       <header className="chat-header glass">
-        {/* Left: logo + chat info */}
+        {/* Left: sidebar toggle (mobile) + chat avatar + info */}
         <div className="header-left">
-          <div className="header-logo">EM</div>
+          <button className="header-sidebar-btn" onClick={onToggleSidebar} title="Чаты">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+          <div className="header-chat-avatar" style={{ background: chatAvatarColor }}>
+            {(chatName || 'E')[0].toUpperCase()}
+          </div>
           <div className="header-chat-info">
             <div className="header-chat-name-row">
-              <span className="header-chat-name">{t('chat.name')}</span>
+              <span className="header-chat-name">{chatName || t('chat.name')}</span>
               {suspiciousActivity && (
                 <span className="header-warning-badge" title={t('chat.suspicious_title')}>
                   <IconWarning /> {t('chat.suspicious')}
@@ -775,10 +795,6 @@ export default function ChatScreen({ session, onLeaveRoom, onLogout }) {
           </div>
           <WalletPanel mode="compact" />
           <LanguageSwitcher />
-          <button className="leave-btn" onClick={onLeaveRoom} title={t('chat.leave_title')}>
-            <IconChevronLeft />
-            <span>{t('chat.chats_btn')}</span>
-          </button>
           <button className="logout-btn" onClick={onLogout} title={t('chat.logout_title')}>
             <IconLogout />
           </button>
