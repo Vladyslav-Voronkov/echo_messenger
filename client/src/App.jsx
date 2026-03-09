@@ -7,8 +7,10 @@ import { deriveRoomId, deriveKey } from './utils/crypto.js';
 import { LangProvider } from './utils/i18n.jsx';
 
 const SESSION_KEY = 'echo_session';
-const CHATS_KEY   = 'echo_chats';
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+// Chats are stored per-account so different users don't share the same list
+const chatsKey = (nickname) => 'echo_chats_' + nickname;
 
 function loadSavedSession() {
   try {
@@ -24,14 +26,15 @@ function loadSavedSession() {
   } catch { return null; }
 }
 
-function loadChats() {
-  try { return JSON.parse(localStorage.getItem(CHATS_KEY) || '[]'); }
+function loadChats(nickname) {
+  if (!nickname) return [];
+  try { return JSON.parse(localStorage.getItem(chatsKey(nickname)) || '[]'); }
   catch { return []; }
 }
 
 function AppInner() {
   const [account,       setAccount]       = useState(loadSavedSession);
-  const [chatList,      setChatList]       = useState(loadChats);
+  const [chatList,      setChatList]       = useState(() => loadChats(loadSavedSession()?.nickname));
   const [activeChatId,  setActiveChatId]   = useState(null);
   const [activeSession, setActiveSession]  = useState(null);
   const [showNewChat,   setShowNewChat]    = useState(false);
@@ -39,16 +42,20 @@ function AppInner() {
   const [deriveError,   setDeriveError]    = useState('');
   const [showSidebar,   setShowSidebar]    = useState(true); // mobile toggle
 
-  // Persist chat list to localStorage on every change
+  // Persist chat list to localStorage (scoped per account nickname)
   useEffect(() => {
-    localStorage.setItem(CHATS_KEY, JSON.stringify(chatList));
-  }, [chatList]);
+    if (account?.nickname) {
+      localStorage.setItem(chatsKey(account.nickname), JSON.stringify(chatList));
+    }
+  }, [chatList, account?.nickname]);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   const handleAuth = useCallback((accountData) => {
     const toSave = { ...accountData, expiresAt: Date.now() + SESSION_TTL };
     localStorage.setItem(SESSION_KEY, JSON.stringify(toSave));
     setAccount(accountData);
+    // Load this account's own chat list
+    setChatList(loadChats(accountData.nickname));
   }, []);
 
   const handleLogout = useCallback(() => {
@@ -56,6 +63,7 @@ function AppInner() {
     setAccount(null);
     setActiveSession(null);
     setActiveChatId(null);
+    setChatList([]);
   }, []);
 
   // ── Open a chat (derive keys + activate) ──────────────────────────────────
