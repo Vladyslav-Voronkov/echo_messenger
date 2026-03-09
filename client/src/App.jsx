@@ -63,6 +63,8 @@ function AppInner() {
     setAccount(null);
     setActiveSession(null);
     setActiveChatId(null);
+    // Do NOT clear chatList from localStorage — chats belong to the user and persist
+    // across sessions, just like Telegram. State reset is enough for the UI.
     setChatList([]);
   }, []);
 
