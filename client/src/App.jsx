@@ -1,4 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { io } from 'socket.io-client';
+
+const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
 import AuthScreen       from './components/AuthScreen.jsx';
 import UnlockScreen     from './components/UnlockScreen.jsx';
 import ChatScreen       from './components/ChatScreen.jsx';
@@ -9,7 +12,7 @@ import GroupCreateModal from './components/GroupCreateModal.jsx';
 import {
   deriveRoomId, deriveKey,
   importPublicKey, exportPublicKey, generateECDHKeyPair, encryptPrivateKey,
-  deriveDMKey, deriveGroupWrapKey, unwrapGroupKey,
+  deriveDMKey, deriveGroupWrapKey, unwrapGroupKey, wrapGroupKey,
 } from './utils/crypto.js';
 import { registerServiceWorker, subscribeToPush } from './utils/pushClient.js';
 import { LangProvider } from './utils/i18n.jsx';
@@ -58,9 +61,10 @@ function AppInner() {
 
   // UI state
   const [showSidebar,   setShowSidebar]   = useState(true);
-  const [showNewLegacy, setShowNewLegacy] = useState(false);
-  const [showNewDM,     setShowNewDM]     = useState(false);
-  const [showNewGroup,  setShowNewGroup]  = useState(false);
+  const [showNewLegacy,   setShowNewLegacy]   = useState(false);
+  const [showNewDM,       setShowNewDM]       = useState(false);
+  const [showNewGroup,    setShowNewGroup]    = useState(false);
+  const [showGroupInvite, setShowGroupInvite] = useState(false);
   const [derivingId,    setDerivingId]    = useState(null);
   const [deriveError,   setDeriveError]   = useState('');
 
@@ -74,6 +78,41 @@ function AppInner() {
       if (storedKey) setNeedsUnlock(true); // has stored key — needs unlock
     }
   }, []);
+
+  // ── Global notification socket ─────────────────────────────────────────────
+  // Connects as soon as the user is logged in.
+  // Receives group_invite_notify and dm_request_notify regardless of which chat is open.
+  useEffect(() => {
+    if (!account?.nickname) return;
+    const socket = io(SOCKET_URL, {
+      transports: ['polling', 'websocket'],
+      query: { nick: account.nickname },
+    });
+
+    socket.on('group_invite_notify', ({ groupId, groupName, fromNick, encryptedGroupKey, encryptedBy, alreadyMember }) => {
+      setGroupList(prev => {
+        if (prev.find(g => g.id === groupId)) return prev;
+        return [{
+          id: groupId, type: 'group',
+          name: groupName || 'Группа',
+          groupId,
+          encryptedGroupKey,
+          encryptedBy: encryptedBy || fromNick,
+          isPending: !alreadyMember,
+          lastMessage: '', lastTs: null, unread: 0,
+        }, ...prev];
+      });
+    });
+
+    socket.on('dm_request_notify', ({ dmId, fromNick }) => {
+      setDmRequests(prev => {
+        if (prev.find(r => r.dmId === dmId)) return prev;
+        return [...prev, { dmId, from: fromNick }];
+      });
+    });
+
+    return () => socket.disconnect();
+  }, [account?.nickname]);
 
   // Persist legacy chats
   useEffect(() => {
@@ -396,6 +435,38 @@ function AppInner() {
     setShowSidebar(false);
   }, [account]);
 
+  // ── Invite user to existing group (called from ChatScreen header button) ─────
+  const handleGroupInvite = useCallback(async (user) => {
+    setShowGroupInvite(false);
+    if (!activeSession || activeSession.type !== 'group') return;
+    if (!privateKey) return;
+    try {
+      let encryptedGroupKey = null;
+      if (user.pubKey && activeSession.cryptoKey) {
+        const theirPubKey = await importPublicKey(user.pubKey);
+        const wrapKey     = await deriveGroupWrapKey(privateKey, theirPubKey);
+        encryptedGroupKey = await wrapGroupKey(activeSession.cryptoKey, wrapKey);
+      }
+      const res = await fetch('/groups/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groupId:          activeSession.groupId,
+          toNick:           user.nickname,
+          encryptedGroupKey,
+          fromNick:         account.nickname,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Ошибка при приглашении');
+      }
+    } catch (err) {
+      console.error('[app] Group invite error:', err);
+      alert('Ошибка при приглашении');
+    }
+  }, [activeSession, privateKey, account]);
+
   // ── Update chat preview (called from ChatScreen) ──────────────────────────────
   const handleUpdateChat = useCallback((chatId, { lastMessage, lastTs }) => {
     setDmList    (prev => prev.map(c => c.id === chatId ? { ...c, lastMessage, lastTs, unread: 0 } : c));
@@ -485,6 +556,7 @@ function AppInner() {
             onUpdateChat={handleUpdateChat}
             onToggleSidebar={() => setShowSidebar(v => !v)}
             onDMRequestAccepted={handleDMRequestAccepted}
+            onInviteToGroup={activeSession.type === 'group' ? () => setShowGroupInvite(true) : undefined}
           />
         ) : (
           <div className="app-welcome">
@@ -522,6 +594,15 @@ function AppInner() {
         <UserSearchModal
           onStartDM={handleStartDM}
           onClose={() => setShowNewDM(false)}
+        />
+      )}
+
+      {showGroupInvite && activeSession?.type === 'group' && (
+        <UserSearchModal
+          title="👥 Добавить в группу"
+          actionLabel="Добавить"
+          onStartDM={handleGroupInvite}
+          onClose={() => setShowGroupInvite(false)}
         />
       )}
 

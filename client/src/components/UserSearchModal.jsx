@@ -8,7 +8,7 @@ import { getNickColor } from '../utils/nickColor.js';
  *   onStartDM(toNick, pubKey) — called when user clicks "Написать"
  *   onClose()
  */
-export default function UserSearchModal({ onStartDM, onClose }) {
+export default function UserSearchModal({ onStartDM, onClose, title = '💬 Новое сообщение', actionLabel = 'Написать' }) {
   const [query,   setQuery]   = useState('@');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -48,7 +48,7 @@ export default function UserSearchModal({ onStartDM, onClose }) {
   };
 
   const handleStartDM = (user) => {
-    onStartDM(user.nickname, user.pubKey);
+    onStartDM(user);
   };
 
   return (
@@ -59,7 +59,7 @@ export default function UserSearchModal({ onStartDM, onClose }) {
         style={{ maxWidth: 400, width: '95%' }}
       >
         <div className="modal-header">
-          <h2 className="modal-title">💬 Новое сообщение</h2>
+          <h2 className="modal-title">{title}</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
@@ -103,7 +103,7 @@ export default function UserSearchModal({ onStartDM, onClose }) {
           )}
 
           {!loading && results.map(user => (
-            <UserRow key={user.nickname} user={user} onStartDM={handleStartDM} />
+            <UserRow key={user.nickname} user={user} onStartDM={handleStartDM} actionLabel={actionLabel} />
           ))}
         </div>
       </div>
@@ -111,7 +111,7 @@ export default function UserSearchModal({ onStartDM, onClose }) {
   );
 }
 
-function UserRow({ user, onStartDM }) {
+function UserRow({ user, onStartDM, actionLabel = 'Написать' }) {
   const color = getNickColor(user.nickname);
   return (
     <div
@@ -150,7 +150,7 @@ function UserRow({ user, onStartDM }) {
         onClick={() => onStartDM(user)}
         style={{ padding: '6px 16px', fontSize: 13, width: 'auto' }}
       >
-        Написать
+        {actionLabel}
       </button>
     </div>
   );

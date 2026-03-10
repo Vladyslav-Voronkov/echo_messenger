@@ -380,7 +380,8 @@ app.post('/dm/request', apiLimiter, async (req, res) => {
     const { dmId, isNew } = createDM(fromNick, toNick);
     if (isNew) {
       createRequest(fromNick, toNick, dmId);
-      // Push notify recipient about new request
+      // Socket + Push notify recipient about new request
+      io.to(`user:${toNick.toLowerCase()}`).emit('dm_request_notify', { dmId, fromNick });
       sendPush(toNick.toLowerCase(), {
         title: `Новый запрос от @${fromNick}`,
         body:  'Хочет написать вам сообщение',
@@ -461,7 +462,21 @@ app.post('/groups/create', apiLimiter, async (req, res) => {
   try {
     const existing = await loadGroup(groupId);
     if (existing) return res.status(409).json({ error: 'Group already exists' });
-    const group = await createGroup({ groupId, name: name.trim().slice(0, 64), createdBy, members });
+    const groupName = name.trim().slice(0, 64);
+    const group = await createGroup({ groupId, name: groupName, createdBy, members });
+    // Real-time notify each initial member (except creator) so they see the group immediately
+    for (const [memberNick, memberData] of Object.entries(members)) {
+      if (memberNick.toLowerCase() === createdBy.toLowerCase()) continue;
+      if (!isValidNick(memberNick)) continue;
+      io.to(`user:${memberNick.toLowerCase()}`).emit('group_invite_notify', {
+        groupId,
+        groupName,
+        fromNick:         createdBy,
+        encryptedGroupKey: memberData.encryptedGroupKey,
+        encryptedBy:       createdBy.toLowerCase(),
+        alreadyMember:     true,
+      });
+    }
     return res.json({ ok: true, group });
   } catch (err) {
     console.error('Group create error:', err);
@@ -489,9 +504,11 @@ app.post('/groups/invite', apiLimiter, async (req, res) => {
     // Socket notify if online
     io.to(`user:${toNick.toLowerCase()}`).emit('group_invite_notify', {
       groupId,
-      groupName:  group?.name || '',
+      groupName:    group?.name || '',
       fromNick,
       encryptedGroupKey,
+      encryptedBy:  fromNick.toLowerCase(),
+      alreadyMember: false,
     });
     return res.json({ ok: true });
   } catch (err) {
