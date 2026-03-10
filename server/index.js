@@ -770,7 +770,10 @@ function validateEncrypted(encrypted) {
   if (!encrypted) return false;
   if (typeof encrypted.iv   !== 'string' || !isValidBase64(encrypted.iv,   32))   return false;
   if (typeof encrypted.data !== 'string' || !isValidBase64(encrypted.data, 131072)) return false;
-  if (typeof encrypted.nick !== 'string' || !isValidBase64(encrypted.nick, 512))  return false;
+  // Nick format: "base64_iv.base64_ciphertext" (dot-separated, produced by encryptNick)
+  if (typeof encrypted.nick !== 'string') return false;
+  const nickParts = encrypted.nick.split('.');
+  if (nickParts.length !== 2 || !isValidBase64(nickParts[0], 32) || !isValidBase64(nickParts[1], 512)) return false;
   if (typeof encrypted.ts   !== 'number') return false;
   // Timestamp must be within ±2 minutes of server time
   if (Math.abs(encrypted.ts - Date.now()) > 120_000) return false;
@@ -881,13 +884,13 @@ io.on('connection', (socket) => {
   });
 
   // ── DM typing ───────────────────────────────────────────────────────────────
-  socket.on('dm_typing', ({ dmId }) => {
+  socket.on('dm_typing', ({ dmId, nick }) => {
     if (!isValidDmId(dmId)) return;
-    socket.to(dmId).emit('dm_typing', { dmId });
+    socket.to(dmId).emit('dm_typing', { dmId, nick });
   });
-  socket.on('dm_stop_typing', ({ dmId }) => {
+  socket.on('dm_stop_typing', ({ dmId, nick }) => {
     if (!isValidDmId(dmId)) return;
-    socket.to(dmId).emit('dm_stop_typing', { dmId });
+    socket.to(dmId).emit('dm_stop_typing', { dmId, nick });
   });
 
   // ── Group join ──────────────────────────────────────────────────────────────
@@ -934,13 +937,13 @@ io.on('connection', (socket) => {
   });
 
   // ── Group typing ─────────────────────────────────────────────────────────────
-  socket.on('group_typing', ({ groupId }) => {
+  socket.on('group_typing', ({ groupId, nick }) => {
     if (!isValidGrpId(groupId)) return;
-    socket.to(groupId).emit('group_typing', { groupId });
+    socket.to(groupId).emit('group_typing', { groupId, nick });
   });
-  socket.on('group_stop_typing', ({ groupId }) => {
+  socket.on('group_stop_typing', ({ groupId, nick }) => {
     if (!isValidGrpId(groupId)) return;
-    socket.to(groupId).emit('group_stop_typing', { groupId });
+    socket.to(groupId).emit('group_stop_typing', { groupId, nick });
   });
 
   // ── Shared events (work for room/dm/group via contextId) ───────────────────

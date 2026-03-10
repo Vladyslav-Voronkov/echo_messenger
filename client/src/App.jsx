@@ -474,7 +474,7 @@ function AppInner() {
     setLegacyList(prev => prev.map(c => c.id === chatId ? { ...c, lastMessage, lastTs, unread: 0 } : c));
   }, []);
 
-  // ── DM Request accepted by me ─────────────────────────────────────────────────
+  // ── DM Request accepted by me (recipient side) ────────────────────────────────
   const handleDMRequestAccepted = useCallback((dmId, fromNick) => {
     setDmRequests(prev => prev.filter(r => r.dmId !== dmId));
     // Move to DM list if not already there
@@ -482,6 +482,14 @@ function AppInner() {
       if (prev.find(d => d.id === dmId)) return prev;
       return [{ id: dmId, type: 'dm', name: '@' + fromNick, dmId, otherNick: fromNick, lastMessage: '', lastTs: null, unread: 0 }, ...prev];
     });
+  }, []);
+
+  // ── DM accepted by other party (sender side) ──────────────────────────────────
+  // Called when the recipient accepts our DM request — remove isPendingSent flag
+  const handleDMAccepted = useCallback((dmId) => {
+    setDmList(prev => prev.map(d =>
+      d.id === dmId ? { ...d, isPendingSent: false } : d
+    ));
   }, []);
 
   // ── Group invite accepted ─────────────────────────────────────────────────────
@@ -556,6 +564,7 @@ function AppInner() {
             onUpdateChat={handleUpdateChat}
             onToggleSidebar={() => setShowSidebar(v => !v)}
             onDMRequestAccepted={handleDMRequestAccepted}
+            onDMAccepted={handleDMAccepted}
             onInviteToGroup={activeSession.type === 'group' ? () => setShowGroupInvite(true) : undefined}
           />
         ) : (

@@ -150,7 +150,7 @@ const IconUserPlus = () => (
   </svg>
 );
 
-export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, onUpdateChat, onToggleSidebar, onDMRequestAccepted, onInviteToGroup }) {
+export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, onUpdateChat, onToggleSidebar, onDMRequestAccepted, onDMAccepted, onInviteToGroup }) {
   const { nickname, cryptoKey, type: chatType = 'legacy', roomId, dmId, groupId } = session;
   const contextId = chatType === 'dm' ? dmId : chatType === 'group' ? groupId : roomId;
   const [isPendingDM, setIsPendingDM] = useState(!!session.isPending);
@@ -364,9 +364,9 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
       setStatus('online');
       const encNick = await encryptNick(cryptoKey, nickname);
       if (chatType === 'dm') {
-        socket.emit('dm_join', { dmId: contextId, nick: encNick });
+        socket.emit('dm_join', { dmId: contextId, encNick });
       } else if (chatType === 'group') {
-        socket.emit('group_join', { groupId: contextId, nick: encNick });
+        socket.emit('group_join', { groupId: contextId, encNick });
       } else {
         socket.emit('join', { roomId: contextId, nick: encNick });
       }
@@ -443,7 +443,11 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
     socket.on('message',       onIncomingMsg);
     socket.on('dm_message',    onIncomingMsg);
     socket.on('group_message', onIncomingMsg);
-    socket.on('dm_accepted', () => setIsPendingDM(false));
+    socket.on('dm_accepted', () => {
+      setIsPendingDM(false);
+      // Notify parent (sender's side) to move DM out of pendingSent state
+      onDMAccepted?.(contextId);
+    });
 
     const onTyping = async ({ nick: encNick }) => {
       try {
@@ -508,9 +512,9 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
         ]);
         const aiRespEvt = chatType === 'dm' ? 'dm_message' : chatType === 'group' ? 'group_message' : 'message';
         const aiRespPayload = chatType === 'dm'
-          ? { dmId: contextId,    encrypted: { iv: respEnc.iv, data: respEnc.data, ts: respTs, nick: encNickGPT } }
+          ? { dmId: contextId,    encrypted: { iv: respEnc.iv, data: respEnc.data, ts: respTs, nick: encNickGPT }, fromNick: nickname }
           : chatType === 'group'
-          ? { groupId: contextId, encrypted: { iv: respEnc.iv, data: respEnc.data, ts: respTs, nick: encNickGPT } }
+          ? { groupId: contextId, encrypted: { iv: respEnc.iv, data: respEnc.data, ts: respTs, nick: encNickGPT }, fromNick: nickname }
           : { roomId: contextId,  encrypted: { iv: respEnc.iv, data: respEnc.data, ts: respTs, nick: encNickGPT } };
         socketRef.current.emit(aiRespEvt, aiRespPayload);
       } catch (e) { console.error('ai_response encrypt error', e); }
@@ -587,9 +591,9 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
         ]);
         const aiCmdEvt = chatType === 'dm' ? 'dm_message' : chatType === 'group' ? 'group_message' : 'message';
         const aiCmdPayload = chatType === 'dm'
-          ? { dmId: contextId,    encrypted: { iv: cmdEnc.iv, data: cmdEnc.data, ts: cmdTs, nick: encNick } }
+          ? { dmId: contextId,    encrypted: { iv: cmdEnc.iv, data: cmdEnc.data, ts: cmdTs, nick: encNick }, fromNick: nickname }
           : chatType === 'group'
-          ? { groupId: contextId, encrypted: { iv: cmdEnc.iv, data: cmdEnc.data, ts: cmdTs, nick: encNick } }
+          ? { groupId: contextId, encrypted: { iv: cmdEnc.iv, data: cmdEnc.data, ts: cmdTs, nick: encNick }, fromNick: nickname }
           : { roomId: contextId,  encrypted: { iv: cmdEnc.iv, data: cmdEnc.data, ts: cmdTs, nick: encNick } };
         socketRef.current.emit(aiCmdEvt, aiCmdPayload);
       } catch (e) { console.error('ai_command encrypt error', e); }
@@ -607,9 +611,9 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
       encryptNick(cryptoKey, nickname),
     ]);
     if (chatType === 'dm') {
-      socketRef.current.emit('dm_message',    { dmId: contextId,    encrypted: { iv, data, ts: Date.now(), nick: encNick } });
+      socketRef.current.emit('dm_message',    { dmId: contextId,    encrypted: { iv, data, ts: Date.now(), nick: encNick }, fromNick: nickname });
     } else if (chatType === 'group') {
-      socketRef.current.emit('group_message', { groupId: contextId, encrypted: { iv, data, ts: Date.now(), nick: encNick } });
+      socketRef.current.emit('group_message', { groupId: contextId, encrypted: { iv, data, ts: Date.now(), nick: encNick }, fromNick: nickname });
     } else {
       socketRef.current.emit('message',       { roomId: contextId,  encrypted: { iv, data, ts: Date.now(), nick: encNick } });
     }
