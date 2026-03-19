@@ -4740,7 +4740,30 @@ body {
   font-weight: 700;
   color: #fff;
   text-shadow: 0 1px 2px rgba(0,0,0,.35);
+  position: relative;
 }
+
+/* Peer online/offline dot on DM avatar */
+.peer-online-dot {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+}
+.peer-online-dot--on  { background: #22c55e; }
+.peer-online-dot--off { background: #6b7280; }
+
+/* Last seen / online status text under DM name */
+.header-peer-status {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 1px;
+  line-height: 1;
+}
+.header-peer-status:empty { display: none; }
 
 .header-sidebar-btn {
   display: none;

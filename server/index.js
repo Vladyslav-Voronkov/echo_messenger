@@ -144,6 +144,8 @@ const socketMeta   = new Map(); // socketId → { roomId, encNick, active }
 const readReceipts = new Map(); // contextId → Map<nick, upToTs>
 const messageLikes = new Map(); // contextId → Map<msgTs, Set<nick>>
 const roomPins     = new Map(); // contextId → Map<msgTs, { ts, pinnedAt }>
+const userOnline   = new Map(); // nick (lower) → socket count
+const userLastSeen = new Map(); // nick (lower) → timestamp
 
 // Per-socket message rate limiter
 const msgRateMap   = new Map(); // socketId → { count, resetAt }
@@ -815,7 +817,17 @@ io.on('connection', (socket) => {
 
   // Join a personal "user room" for receiving invites/requests while not in a chat
   if (userNick && isValidNick(userNick)) {
-    socket.join(`user:${userNick.toLowerCase()}`);
+    const nLow = userNick.toLowerCase();
+    socket.join(`user:${nLow}`);
+    // Track online presence
+    userOnline.set(nLow, (userOnline.get(nLow) || 0) + 1);
+    userLastSeen.delete(nLow);
+    // Notify DM peers that this user came online
+    const dmsForUser = listDMs(nLow);
+    for (const dm of dmsForUser) {
+      const other = dm.other.toLowerCase();
+      io.to(`user:${other}`).emit('peer_status', { nick: nLow, online: true, lastSeen: null });
+    }
   }
 
   // ── Legacy room join ────────────────────────────────────────────────────────
@@ -875,6 +887,19 @@ io.on('connection', (socket) => {
     if (userNick) {
       const reqs = getRequests(userNick);
       if (reqs.length > 0) socket.emit('dm_requests_pending', { requests: reqs });
+    }
+
+    // Send current peer online status
+    if (userNick && isValidNick(userNick)) {
+      const conv = getConversation(dmId);
+      if (conv) {
+        const peerNick = conv.participants.find(p => p !== userNick.toLowerCase());
+        if (peerNick) {
+          const online   = (userOnline.get(peerNick) || 0) > 0;
+          const lastSeen = userLastSeen.get(peerNick) || null;
+          socket.emit('peer_status', { nick: peerNick, online, lastSeen });
+        }
+      }
     }
   });
 
@@ -1090,10 +1115,28 @@ io.on('connection', (socket) => {
     const contextId = currentContext || meta?.roomId;
     const encNick   = currentNick    || meta?.encNick;
 
-    if (!contextId) return;
-    if (encNick) removeMember(contextId, encNick, socket.id);
+    if (contextId) {
+      if (encNick) removeMember(contextId, encNick, socket.id);
+      io.to(contextId).emit('online_count', { count: getRoomCount(contextId) });
+    }
 
-    io.to(contextId).emit('online_count', { count: getRoomCount(contextId) });
+    // Update online presence and notify DM peers
+    if (userNick && isValidNick(userNick)) {
+      const nLow = userNick.toLowerCase();
+      const count = Math.max(0, (userOnline.get(nLow) || 1) - 1);
+      if (count === 0) {
+        userOnline.delete(nLow);
+        const lastSeen = Date.now();
+        userLastSeen.set(nLow, lastSeen);
+        const dmsForUser = listDMs(nLow);
+        for (const dm of dmsForUser) {
+          const other = dm.other.toLowerCase();
+          io.to(`user:${other}`).emit('peer_status', { nick: nLow, online: false, lastSeen });
+        }
+      } else {
+        userOnline.set(nLow, count);
+      }
+    }
   });
 });
 

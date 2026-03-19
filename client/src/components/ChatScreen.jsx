@@ -23,6 +23,21 @@ function formatMsgDate(ts) {
   return d.toLocaleDateString('ru-RU', opts);
 }
 
+// ── Last seen label ───────────────────────────────────────────────────────────
+function formatLastSeen(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  if (diff < 60_000)       return 'был(а) только что';
+  if (diff < 3_600_000)    return `был(а) ${Math.floor(diff / 60_000)} мин назад`;
+  if (diff < 86_400_000)   return `был(а) ${Math.floor(diff / 3_600_000)} ч назад`;
+  const d = new Date(ts);
+  const today = new Date();
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString())
+    return 'был(а) вчера в ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return 'был(а) ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+}
+
 // In dev: Vite proxies /socket.io → localhost:3001 automatically.
 // In production: server serves the built client, so same origin = correct.
 const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
@@ -166,6 +181,7 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
   const { nickname, cryptoKey, type: chatType = 'legacy', roomId, dmId, groupId } = session;
   const contextId = chatType === 'dm' ? dmId : chatType === 'group' ? groupId : roomId;
   const [isPendingDM, setIsPendingDM] = useState(!!session.isPending);
+  const [peerStatus, setPeerStatus]   = useState({ online: false, lastSeen: null });
   const { t } = useTranslation();
   const [messages, setMessages] = useState([]);
   const [visibleCount, setVisibleCount] = useState(BATCH);
@@ -449,8 +465,11 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
     socket.on('group_message', onIncomingMsg);
     socket.on('dm_accepted', () => {
       setIsPendingDM(false);
-      // Notify parent (sender's side) to move DM out of pendingSent state
       onDMAccepted?.(contextId);
+    });
+
+    socket.on('peer_status', ({ online, lastSeen }) => {
+      if (chatType === 'dm') setPeerStatus({ online, lastSeen: lastSeen || null });
     });
 
     const onTyping = async ({ nick: encNick }) => {
@@ -789,8 +808,11 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
               <line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
           </button>
-          <div className="header-chat-avatar" style={{ background: chatAvatarColor }}>
+          <div className="header-chat-avatar" style={{ background: chatAvatarColor, position: 'relative' }}>
             {(chatName || 'E')[0].toUpperCase()}
+            {chatType === 'dm' && (
+              <span className={`peer-online-dot ${peerStatus.online ? 'peer-online-dot--on' : 'peer-online-dot--off'}`} />
+            )}
           </div>
           <div className="header-chat-info">
             <div className="header-chat-name-row">
@@ -801,15 +823,22 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
                 </span>
               )}
             </div>
+            {chatType === 'dm' && (
+              <div className="header-peer-status">
+                {peerStatus.online ? 'в сети' : peerStatus.lastSeen ? formatLastSeen(peerStatus.lastSeen) : ''}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Right: online count, media, nick, actions */}
+        {/* Right: online count (group/legacy only), media, actions */}
         <div className="header-right">
-          <div className="online-badge">
-            <IconUsers />
-            <span>{onlineCount}</span>
-          </div>
+          {chatType !== 'dm' && (
+            <div className="online-badge">
+              <IconUsers />
+              <span>{onlineCount}</span>
+            </div>
+          )}
           <button
             className={'header-btn' + (showMediaPanel ? ' active' : '')}
             onClick={() => setShowMediaPanel(v => !v)}
@@ -826,20 +855,7 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
               <IconUserPlus />
             </button>
           )}
-          <div className="nick-badge">
-            <div
-              className="nick-avatar-sm"
-              style={{ background: ownNickColor }}
-              title={nickname}
-            >
-              {nickname ? nickname[0].toUpperCase() : '?'}
-            </div>
-            <span>{nickname}</span>
-          </div>
           <WalletPanel mode="compact" />
-          <button className="logout-btn" onClick={onLogout} title={t('chat.logout_title')}>
-            <IconLogout />
-          </button>
         </div>
       </header>
 
