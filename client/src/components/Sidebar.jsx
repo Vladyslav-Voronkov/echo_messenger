@@ -110,11 +110,14 @@ function ChatItem({ chat, isActive, isLoading, onSelect }) {
       onClick={() => onSelect(chat)}
     >
       <div className="sidebar-item-avatar" style={{
-        background: color,
+        background: (chat.peerAvatar || chat.avatar) ? 'var(--surface-1)' : color,
         opacity: isPending ? 0.7 : 1,
+        overflow: 'hidden',
       }}>
         {isLoading
           ? <span className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }} />
+          : (chat.peerAvatar || chat.avatar)
+          ? <img src={`data:image/jpeg;base64,${chat.peerAvatar || chat.avatar}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           : (chat.name || '#')[0].toUpperCase()}
       </div>
       <div className="sidebar-item-body">

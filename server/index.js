@@ -638,6 +638,9 @@ app.post('/groups/rename', apiLimiter, async (req, res) => {
   const result = await renameGroup(groupId, name);
   if (result.error) return res.status(400).json(result);
   io.to(groupId).emit('group_updated', { groupId, name: result.name });
+  const sysObj = { type: 'system', subtype: 'group_rename', text: `@${nick.toLowerCase()} переименовал группу в "${result.name}"`, ts: Date.now() };
+  await appendGroupMessage(groupId, JSON.stringify(sysObj));
+  io.to(groupId).emit('group_system', sysObj);
   return res.json(result);
 });
 
@@ -674,6 +677,9 @@ app.post('/groups/set-avatar', apiLimiter, async (req, res) => {
   const result = await setGroupAvatar(groupId, avatar);
   if (result.error) return res.status(400).json(result);
   io.to(groupId).emit('group_updated', { groupId, avatar });
+  const sysObjAv = { type: 'system', subtype: 'group_avatar', text: `@${nick.toLowerCase()} изменил аватар группы`, ts: Date.now() };
+  await appendGroupMessage(groupId, JSON.stringify(sysObjAv));
+  io.to(groupId).emit('group_system', sysObjAv);
   return res.json(result);
 });
 

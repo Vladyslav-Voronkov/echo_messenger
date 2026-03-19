@@ -23,6 +23,8 @@ import { LangProvider } from './utils/i18n.jsx';
 const SESSION_KEY  = 'echo_session';
 const SESSION_TTL  = 30 * 24 * 60 * 60 * 1000;
 const legacyKey    = (nick) => 'echo_chats_' + nick;
+const getLastSeen = (chatId) => parseInt(localStorage.getItem('echo_ls_' + chatId) || '0', 10);
+const markSeen   = (chatId, ts) => { if (chatId && ts) localStorage.setItem('echo_ls_' + chatId, String(ts)); };
 
 // ── Preview decryption helper ─────────────────────────────────────────────────
 async function extractPreviewText(encObj, key) {
@@ -172,7 +174,7 @@ function AppInner() {
           otherNick:   d.other,
           lastMessage: d.msgCount > 0 ? '...' : '',
           lastTs:      d.lastTs || null,
-          unread:      d.msgCount > 0 ? 1 : 0,
+          unread:      (d.lastTs || 0) > getLastSeen(d.dmId) ? 1 : 0,
         })));
         if (pending?.length) {
           setDmList(prev => [
@@ -197,9 +199,10 @@ function AppInner() {
           encryptedGroupKey: g.encryptedGroupKey,
           encryptedBy:       g.encryptedBy,
           isPending:         g.isPending,
+          avatar:            g.avatar || null,
           lastMessage:       g.msgCount > 0 ? '...' : '',
           lastTs:            g.lastTs || null,
-          unread:            g.msgCount > 0 ? 1 : 0,
+          unread:            (g.lastTs || 0) > getLastSeen(g.groupId) ? 1 : 0,
         })));
       }
 
@@ -222,6 +225,25 @@ function AppInner() {
               const key  = await deriveDMKey(privKey, theirPub, nick, d.other);
               const text = await extractPreviewText(d.lastEncrypted, key);
               if (text) setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, lastMessage: text } : c));
+            } catch { /* skip */ }
+          }
+        })();
+
+        // Peer avatar loading for DMs
+        (async () => {
+          for (const d of dmsData) {
+            try {
+              const cached = localStorage.getItem('echo_avatar_' + d.other.toLowerCase());
+              if (cached) {
+                setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, peerAvatar: cached } : c));
+                continue;
+              }
+              const pubRes = await fetch(`/users/pubkey/${encodeURIComponent(d.other)}`);
+              const pubData = await pubRes.json();
+              if (pubData.avatar) {
+                localStorage.setItem('echo_avatar_' + d.other.toLowerCase(), pubData.avatar);
+                setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, peerAvatar: pubData.avatar } : c));
+              }
             } catch { /* skip */ }
           }
         })();
@@ -326,6 +348,7 @@ function AppInner() {
       ]);
       setActiveSession({ type: 'legacy', nickname: account?.nickname, roomId, cryptoKey, chatId: chat.id });
       setActiveChatId(chat.id);
+      markSeen(chat.id, Date.now());
       setDerivingId(null);
       setShowSidebar(false);
     } catch {
@@ -360,6 +383,7 @@ function AppInner() {
         isPending:  dmChatInfo.isPending || false,
       });
       setActiveChatId(dmChatInfo.id);
+      markSeen(dmChatInfo.id, Date.now());
       setDerivingId(null);
       setShowSidebar(false);
     } catch (err) {
@@ -414,6 +438,7 @@ function AppInner() {
         isPending: groupChatInfo.isPending || false,
       });
       setActiveChatId(groupChatInfo.id);
+      markSeen(groupChatInfo.id, Date.now());
       setDerivingId(null);
       setShowSidebar(false);
     } catch (err) {
@@ -550,6 +575,7 @@ function AppInner() {
   // ── Update chat preview (called from ChatScreen) ──────────────────────────────
   const handleUpdateChat = useCallback((chatId, updates) => {
     const { lastMessage, lastTs, name } = updates;
+    if (lastTs) markSeen(chatId, lastTs);
     setDmList    (prev => prev.map(c => c.id === chatId ? { ...c, ...(lastMessage !== undefined && { lastMessage }), ...(lastTs !== undefined && { lastTs }), ...(name !== undefined && { name }), unread: 0 } : c));
     setGroupList (prev => prev.map(c => c.id === chatId ? { ...c, ...(lastMessage !== undefined && { lastMessage }), ...(lastTs !== undefined && { lastTs }), ...(name !== undefined && { name }), unread: 0 } : c));
     setLegacyList(prev => prev.map(c => c.id === chatId ? { ...c, ...(lastMessage !== undefined && { lastMessage }), ...(lastTs !== undefined && { lastTs }), unread: 0 } : c));
@@ -666,6 +692,12 @@ function AppInner() {
             onDMAccepted={handleDMAccepted}
             onInviteToGroup={activeSession.type === 'group' ? () => setShowGroupInvite(true) : undefined}
             onOpenGroupInfo={activeSession.type === 'group' ? () => setShowGroupInfo(true) : undefined}
+            chatAvatar={activeSession.type === 'dm'
+              ? (dmList.find(c => c.id === activeChatId)?.peerAvatar || null)
+              : activeSession.type === 'group'
+              ? (groupList.find(c => c.id === activeChatId)?.avatar || null)
+              : null
+            }
           />
         ) : (
           <div className="app-welcome">

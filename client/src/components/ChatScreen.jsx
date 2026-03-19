@@ -177,7 +177,7 @@ const IconUserPlus = () => (
   </svg>
 );
 
-export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, onUpdateChat, onToggleSidebar, onDMRequestAccepted, onDMAccepted, onInviteToGroup, onOpenGroupInfo }) {
+export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, onUpdateChat, onToggleSidebar, onDMRequestAccepted, onDMAccepted, onInviteToGroup, onOpenGroupInfo, chatAvatar = null }) {
   const { nickname, cryptoKey, type: chatType = 'legacy', roomId, dmId, groupId } = session;
   const contextId = chatType === 'dm' ? dmId : chatType === 'group' ? groupId : roomId;
   const [isPendingDM, setIsPendingDM] = useState(!!session.isPending);
@@ -203,6 +203,9 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
   const [showScrollDate, setShowScrollDate] = useState(false);
   // v0.2.0: unread counter on scroll button
   const [unreadCount, setUnreadCount] = useState(0);
+
+  const [peerAvatars, setPeerAvatars] = useState({});
+  const fetchedNicksRef = useRef(new Set());
 
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -284,6 +287,24 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
+  // Fetch sender avatars for messages
+  useEffect(() => {
+    if (chatType === 'legacy') return;
+    const toFetch = messages
+      .filter(m => !m.isOwn && m.nick && !fetchedNicksRef.current.has(m.nick.toLowerCase()))
+      .map(m => m.nick.toLowerCase());
+    const unique = [...new Set(toFetch)];
+    for (const nick of unique) {
+      fetchedNicksRef.current.add(nick);
+      const cached = localStorage.getItem('echo_avatar_' + nick);
+      if (cached) { setPeerAvatars(prev => ({ ...prev, [nick]: cached })); continue; }
+      fetch(`/users/pubkey/${encodeURIComponent(nick)}`)
+        .then(r => r.json())
+        .then(d => { if (d.avatar) { localStorage.setItem('echo_avatar_' + nick, d.avatar); setPeerAvatars(prev => ({ ...prev, [nick]: d.avatar })); } })
+        .catch(() => {});
+    }
+  }, [messages, chatType]);
+
   // Track join/leave events for suspicious activity detection
   const recordActivityEvent = useCallback(() => {
     const now = Date.now();
@@ -345,6 +366,11 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
             const obj = JSON.parse(line);
             // Handle persisted system events (join/leave/pin)
             if (obj.type === 'system') {
+              // Plain-text system messages (group rename, avatar change, etc.)
+              if (obj.text && obj.subtype && obj.subtype !== 'pin' && obj.subtype !== 'unpin') {
+                return { id: 'hist-sys-' + i, type: 'system', text: obj.text, ts: obj.ts };
+              }
+              // Encrypted-nick system messages (pin/unpin)
               try {
                 const plainNick = await decryptNick(cryptoKey, obj.nick);
                 let text = '';
@@ -481,6 +507,15 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
     socket.on('group_updated', ({ groupId: gId, name, avatar }) => {
       if (gId === contextId) {
         if (name) onUpdateChat?.(session.chatId, { lastMessage: undefined, name });
+      }
+    });
+
+    socket.on('group_system', ({ text, ts, subtype }) => {
+      if (text) {
+        setMessages(prev => [
+          ...prev,
+          { id: 'sys-' + ts + '-' + Math.random(), type: 'system', text, ts: ts || Date.now() },
+        ]);
       }
     });
 
@@ -817,8 +852,11 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
               <line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
           </button>
-          <div className="header-chat-avatar" style={{ background: chatAvatarColor, position: 'relative' }}>
-            {(chatName || 'E')[0].toUpperCase()}
+          <div className="header-chat-avatar" style={{ background: chatAvatar ? 'var(--surface-1)' : chatAvatarColor, position: 'relative', overflow: 'hidden' }}>
+            {chatAvatar
+              ? <img src={`data:image/jpeg;base64,${chatAvatar}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : (chatName || 'E')[0].toUpperCase()
+            }
             {chatType === 'dm' && (
               <span className={`peer-online-dot ${peerStatus.online ? 'peer-online-dot--on' : 'peer-online-dot--off'}`} />
             )}
@@ -949,6 +987,7 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
                   onLike={handleLike}
                   pins={pins}
                   onPin={handlePin}
+                  senderAvatar={!msg.isOwn && msg.nick ? (peerAvatars[msg.nick.toLowerCase()] || null) : null}
                 />
               </Fragment>
             );

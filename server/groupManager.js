@@ -116,6 +116,7 @@ export async function listGroupsForNick(nick) {
             encryptedBy: data.members[n]?.encryptedBy || data.pending[n]?.invitedBy || data.createdBy || null,
             isPending: !!data.pending[n],
             invitedBy: data.pending[n]?.invitedBy || null,
+            avatar: data.avatar || null,
           });
         }
       } catch {}
