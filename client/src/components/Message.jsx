@@ -47,7 +47,7 @@ const IconHeart = () => (
   </svg>
 );
 
-export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike, pins, onPin }) {
+export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike, pins, onPin, senderAvatar = null }) {
   const { t, lang } = useTranslation();
   // System notification messages (join/leave/pin)
   if (message.type === 'system') {
@@ -168,10 +168,13 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
       {!isOwn && (
         <div
           className="msg-avatar"
-          style={{ background: nickColor }}
+          style={{ background: senderAvatar ? 'var(--surface-1)' : nickColor, overflow: 'hidden' }}
           title={nick}
         >
-          {nick ? nick[0].toUpperCase() : '?'}
+          {senderAvatar
+            ? <img src={`data:image/jpeg;base64,${senderAvatar}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+            : (nick ? nick[0].toUpperCase() : '?')
+          }
         </div>
       )}
 
