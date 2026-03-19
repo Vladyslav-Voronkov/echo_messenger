@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { getNickColor } from '../utils/nickColor.js';
 
 function formatTime(ts) {
