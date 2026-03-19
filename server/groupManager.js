@@ -154,3 +154,32 @@ export async function isMember(groupId, nick) {
 export function isValidGroupId(id) {
   return typeof id === 'string' && /^[a-f0-9]{64}$/.test(id);
 }
+
+/** Rename a group */
+export async function renameGroup(groupId, name) {
+  const data = await loadGroup(groupId);
+  if (!data) return { error: 'Group not found' };
+  data.name = String(name).trim().slice(0, 64);
+  await saveGroup(groupId, data);
+  return { ok: true, name: data.name };
+}
+
+/** Remove a member from the group */
+export async function removeMemberFromGroup(groupId, targetNick) {
+  const data = await loadGroup(groupId);
+  if (!data) return { error: 'Group not found' };
+  const key = targetNick.toLowerCase();
+  if (!data.members[key]) return { error: 'Not a member' };
+  delete data.members[key];
+  await saveGroup(groupId, data);
+  return { ok: true };
+}
+
+/** Set group avatar (base64 string, or null to clear) */
+export async function setGroupAvatar(groupId, avatar) {
+  const data = await loadGroup(groupId);
+  if (!data) return { error: 'Group not found' };
+  data.avatar = avatar || null;
+  await saveGroup(groupId, data);
+  return { ok: true };
+}

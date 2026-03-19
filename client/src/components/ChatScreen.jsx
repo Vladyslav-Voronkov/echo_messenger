@@ -177,7 +177,7 @@ const IconUserPlus = () => (
   </svg>
 );
 
-export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, onUpdateChat, onToggleSidebar, onDMRequestAccepted, onDMAccepted, onInviteToGroup }) {
+export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, onUpdateChat, onToggleSidebar, onDMRequestAccepted, onDMAccepted, onInviteToGroup, onOpenGroupInfo }) {
   const { nickname, cryptoKey, type: chatType = 'legacy', roomId, dmId, groupId } = session;
   const contextId = chatType === 'dm' ? dmId : chatType === 'group' ? groupId : roomId;
   const [isPendingDM, setIsPendingDM] = useState(!!session.isPending);
@@ -472,6 +472,18 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
       if (chatType === 'dm') setPeerStatus({ online, lastSeen: lastSeen || null });
     });
 
+    socket.on('receipts_snapshot', ({ receipts }) => {
+      if (receipts && typeof receipts === 'object') {
+        setReadReceipts(prev => ({ ...receipts, ...prev }));
+      }
+    });
+
+    socket.on('group_updated', ({ groupId: gId, name, avatar }) => {
+      if (gId === contextId) {
+        if (name) onUpdateChat?.(session.chatId, { lastMessage: undefined, name });
+      }
+    });
+
     const onTyping = async ({ nick: encNick }) => {
       try {
         const plainNick = await decryptNick(cryptoKey, encNick);
@@ -763,13 +775,10 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
     });
   }, []);
 
-  sendReadRef.current = async () => {
+  sendReadRef.current = () => {
     if (!socketRef.current?.connected || messagesRef.current.length === 0) return;
-    try {
-      const upToTs = messagesRef.current[messagesRef.current.length - 1].ts;
-      const encNick = await encryptNick(cryptoKey, nickname);
-      socketRef.current.emit('read', { roomId: contextId, nick: encNick, upToTs });
-    } catch { /* ignore */ }
+    const upToTs = messagesRef.current[messagesRef.current.length - 1].ts;
+    socketRef.current.emit('read', { roomId: contextId, nick: nickname, upToTs });
   };
 
   useEffect(() => {
@@ -847,12 +856,17 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
             <IconMedia />
           </button>
           {chatType === 'group' && onInviteToGroup && (
-            <button
-              className="header-btn"
-              onClick={onInviteToGroup}
-              title="Добавить участника"
-            >
+            <button className="header-btn" onClick={onInviteToGroup} title="Добавить участника">
               <IconUserPlus />
+            </button>
+          )}
+          {chatType === 'group' && onOpenGroupInfo && (
+            <button className="header-btn" onClick={onOpenGroupInfo} title="Информация о группе">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+                <polyline points="11 12 12 12 12 16"/>
+              </svg>
             </button>
           )}
           <WalletPanel mode="compact" />

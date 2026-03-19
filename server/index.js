@@ -13,7 +13,7 @@ import multer from 'multer';
 import { initTelegram, forwardToTelegram } from './telegram.js';
 import { initPush, getVapidPublicKey, addSubscription, removeSubscription, sendPush } from './pushService.js';
 import { initDM, getDmId, createDM, acceptDM, declineDM, createRequest, getRequests, listDMs, listSentRequests, getConversation, appendDmMessage, readDmHistory } from './dmManager.js';
-import { initGroups, loadGroup, saveGroup, createGroup, inviteToGroup, acceptGroupInvite, declineGroupInvite, listGroupsForNick, appendGroupMessage, readGroupHistory, isMember, isValidGroupId, getGroupFilePath } from './groupManager.js';
+import { initGroups, loadGroup, saveGroup, createGroup, inviteToGroup, acceptGroupInvite, declineGroupInvite, listGroupsForNick, appendGroupMessage, readGroupHistory, isMember, isValidGroupId, getGroupFilePath, renameGroup, removeMemberFromGroup, setGroupAvatar } from './groupManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,8 +21,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR      = process.env.DATA_DIR || path.join(__dirname, '..');
 const CHATS_DIR     = path.join(DATA_DIR, 'chats');
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
-const LIKES_FILE    = path.join(DATA_DIR, 'likes.json');
-const PINS_FILE     = path.join(DATA_DIR, 'pins.json');
+const LIKES_FILE         = path.join(DATA_DIR, 'likes.json');
+const PINS_FILE          = path.join(DATA_DIR, 'pins.json');
+const READ_RECEIPTS_FILE = path.join(DATA_DIR, 'read_receipts.json');
 const FILES_DIR     = path.join(DATA_DIR, 'files');
 
 await fs.mkdir(CHATS_DIR, { recursive: true });
@@ -114,6 +115,9 @@ function isValidHash(h) {
 function isValidBase64(s, maxLen = 131072) {
   return typeof s === 'string' && s.length > 0 && s.length <= maxLen && /^[A-Za-z0-9+/=]+$/.test(s);
 }
+function isValidAvatar(s) {
+  return typeof s === 'string' && s.length > 0 && s.length <= 500_000 && /^[A-Za-z0-9+/=]+$/.test(s);
+}
 
 function isValidFileId(id) {
   return typeof id === 'string' && /^[a-f0-9]{32}$/.test(id);
@@ -163,6 +167,7 @@ function checkMsgRate(socketId) {
 
 await loadLikes();
 await loadPins();
+await loadReadReceipts();
 
 // ── Online count ──────────────────────────────────────────────────────────────
 function getRoomCount(contextId) {
@@ -198,6 +203,27 @@ async function saveLikes() {
   const tmp = LIKES_FILE + '.tmp';
   await fs.writeFile(tmp, JSON.stringify(data), 'utf8');
   await fs.rename(tmp, LIKES_FILE);
+}
+
+// ── Read receipts storage ─────────────────────────────────────────────────────
+async function loadReadReceipts() {
+  try {
+    const raw = await fs.readFile(READ_RECEIPTS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    for (const [ctxId, map] of Object.entries(data)) {
+      readReceipts.set(ctxId, new Map(Object.entries(map)));
+    }
+  } catch {}
+}
+
+async function saveReadReceipts() {
+  const data = {};
+  for (const [ctxId, map] of readReceipts) {
+    if (map.size > 0) data[ctxId] = Object.fromEntries(map);
+  }
+  const tmp = READ_RECEIPTS_FILE + '.tmp';
+  await fs.writeFile(tmp, JSON.stringify(data), 'utf8');
+  await fs.rename(tmp, READ_RECEIPTS_FILE);
 }
 
 // ── Pins storage ──────────────────────────────────────────────────────────────
@@ -357,7 +383,25 @@ app.get('/users/pubkey/:nickname', apiLimiter, async (req, res) => {
     const accounts = await loadAccounts();
     const account = accounts[nick];
     if (!account) return res.status(404).json({ error: 'User not found' });
-    return res.json({ nickname: account.nickname, pubKey: account.pubKey || null });
+    return res.json({ nickname: account.nickname, pubKey: account.pubKey || null, avatar: account.avatar || null });
+  } catch {
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /users/set-avatar
+app.post('/users/set-avatar', apiLimiter, async (req, res) => {
+  const { nick, avatar } = req.body || {};
+  if (!isValidNick(nick) || !isValidAvatar(avatar)) {
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+  try {
+    const accounts = await loadAccounts();
+    const key = nick.trim().toLowerCase();
+    if (!accounts[key]) return res.status(404).json({ error: 'User not found' });
+    accounts[key].avatar = avatar;
+    await saveAccounts(accounts);
+    return res.json({ ok: true });
   } catch {
     return res.status(500).json({ error: 'Server error' });
   }
@@ -578,6 +622,59 @@ app.get('/groups/info/:groupId', apiLimiter, async (req, res) => {
   const group = await loadGroup(groupId);
   if (!group) return res.status(404).json({ error: 'Not found' });
   return res.json(group);
+});
+
+// POST /groups/rename
+app.post('/groups/rename', apiLimiter, async (req, res) => {
+  const { groupId, nick, name } = req.body || {};
+  if (!isValidGrpId(groupId) || !isValidNick(nick) || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+  const group = await loadGroup(groupId);
+  if (!group) return res.status(404).json({ error: 'Not found' });
+  if (!group.members[nick.toLowerCase()] && group.createdBy !== nick.toLowerCase()) {
+    return res.status(403).json({ error: 'Not a member' });
+  }
+  const result = await renameGroup(groupId, name);
+  if (result.error) return res.status(400).json(result);
+  io.to(groupId).emit('group_updated', { groupId, name: result.name });
+  return res.json(result);
+});
+
+// POST /groups/remove-member
+app.post('/groups/remove-member', apiLimiter, async (req, res) => {
+  const { groupId, nick, targetNick } = req.body || {};
+  if (!isValidGrpId(groupId) || !isValidNick(nick) || !isValidNick(targetNick)) {
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+  const group = await loadGroup(groupId);
+  if (!group) return res.status(404).json({ error: 'Not found' });
+  // Only creator can remove others; anyone can remove themselves (leave)
+  if (group.createdBy !== nick.toLowerCase() && nick.toLowerCase() !== targetNick.toLowerCase()) {
+    return res.status(403).json({ error: 'Only creator can remove members' });
+  }
+  const result = await removeMemberFromGroup(groupId, targetNick);
+  if (result.error) return res.status(400).json(result);
+  io.to(groupId).emit('group_member_removed', { groupId, nick: targetNick.toLowerCase() });
+  io.to(`user:${targetNick.toLowerCase()}`).emit('group_removed', { groupId });
+  return res.json(result);
+});
+
+// POST /groups/set-avatar
+app.post('/groups/set-avatar', apiLimiter, async (req, res) => {
+  const { groupId, nick, avatar } = req.body || {};
+  if (!isValidGrpId(groupId) || !isValidNick(nick) || !isValidAvatar(avatar)) {
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+  const group = await loadGroup(groupId);
+  if (!group) return res.status(404).json({ error: 'Not found' });
+  if (!group.members[nick.toLowerCase()] && group.createdBy !== nick.toLowerCase()) {
+    return res.status(403).json({ error: 'Not a member' });
+  }
+  const result = await setGroupAvatar(groupId, avatar);
+  if (result.error) return res.status(400).json(result);
+  io.to(groupId).emit('group_updated', { groupId, avatar });
+  return res.json(result);
 });
 
 // GET /groups/history/:groupId
@@ -845,6 +942,10 @@ io.on('connection', (socket) => {
     const pins = [...(roomPins.get(roomId)?.values() ?? [])].sort((a, b) => a.ts - b.ts);
     if (pins.length > 0) socket.emit('pins_updated', { pins });
 
+    // Send read receipts snapshot
+    const receiptsMap = readReceipts.get(roomId);
+    if (receiptsMap?.size > 0) socket.emit('receipts_snapshot', { receipts: Object.fromEntries(receiptsMap) });
+
     const roomLikesMap = messageLikes.get(roomId);
     if (roomLikesMap?.size > 0) {
       const snap = {};
@@ -888,6 +989,10 @@ io.on('connection', (socket) => {
       const reqs = getRequests(userNick);
       if (reqs.length > 0) socket.emit('dm_requests_pending', { requests: reqs });
     }
+
+    // Send read receipts snapshot for this DM
+    const dmReceiptsMap = readReceipts.get(dmId);
+    if (dmReceiptsMap?.size > 0) socket.emit('receipts_snapshot', { receipts: Object.fromEntries(dmReceiptsMap) });
 
     // Send current peer online status
     if (userNick && isValidNick(userNick)) {
@@ -954,6 +1059,10 @@ io.on('connection', (socket) => {
     // Send pins for group
     const pins = [...(roomPins.get(groupId)?.values() ?? [])].sort((a, b) => a.ts - b.ts);
     if (pins.length > 0) socket.emit('pins_updated', { pins });
+
+    // Send read receipts snapshot for this group
+    const grpReceiptsMap = readReceipts.get(groupId);
+    if (grpReceiptsMap?.size > 0) socket.emit('receipts_snapshot', { receipts: Object.fromEntries(grpReceiptsMap) });
   });
 
   // ── Group message ────────────────────────────────────────────────────────────
@@ -1009,10 +1118,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('read', ({ roomId, nick, upToTs }) => {
-    if (!isValidCtxId(roomId) || typeof nick !== 'string' || typeof upToTs !== 'number') return;
+    if (!isValidCtxId(roomId) || !isValidNick(nick) || typeof upToTs !== 'number') return;
+    const key = nick.toLowerCase();
     if (!readReceipts.has(roomId)) readReceipts.set(roomId, new Map());
-    readReceipts.get(roomId).set(nick, upToTs);
-    io.to(roomId).emit('read_by', { nick, upToTs });
+    readReceipts.get(roomId).set(key, upToTs);
+    io.to(roomId).emit('read_by', { nick: key, upToTs });
+    saveReadReceipts().catch(() => {});
   });
 
   socket.on('like', ({ roomId, msgTs, nick }) => {

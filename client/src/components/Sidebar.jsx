@@ -140,6 +140,7 @@ function ChatItem({ chat, isActive, isLoading, onSelect }) {
 
 export default function Sidebar({
   account,
+  myAvatar,
   dmList,
   groupList,
   legacyList,
@@ -151,6 +152,7 @@ export default function Sidebar({
   onNewGroup,
   onNewLegacy,
   onLogout,
+  onOpenProfile,
 }) {
   const nickColor = getNickColor(account?.nickname || '');
   const [showLegacy, setShowLegacy] = useState(true);
@@ -161,8 +163,20 @@ export default function Sidebar({
       {/* ── Header ── */}
       <div className="sidebar-header">
         <div className="sidebar-account">
-          <div className="sidebar-avatar" style={{ background: nickColor }}>
-            {account?.nickname?.[0]?.toUpperCase() || '?'}
+          <div
+            className="sidebar-avatar"
+            style={{
+              background: myAvatar ? 'var(--surface-1)' : nickColor,
+              cursor: onOpenProfile ? 'pointer' : 'default',
+              overflow: 'hidden',
+            }}
+            onClick={onOpenProfile}
+            title={onOpenProfile ? 'Настройки профиля' : undefined}
+          >
+            {myAvatar
+              ? <img src={`data:image/jpeg;base64,${myAvatar}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : account?.nickname?.[0]?.toUpperCase() || '?'
+            }
           </div>
           <span className="sidebar-nickname">{account?.nickname}</span>
         </div>

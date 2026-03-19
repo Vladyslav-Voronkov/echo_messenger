@@ -9,6 +9,8 @@ import Sidebar          from './components/Sidebar.jsx';
 import NewChatModal     from './components/NewChatModal.jsx';
 import UserSearchModal  from './components/UserSearchModal.jsx';
 import GroupCreateModal from './components/GroupCreateModal.jsx';
+import GroupInfoPanel   from './components/GroupInfoPanel.jsx';
+import ProfileModal     from './components/ProfileModal.jsx';
 import {
   deriveRoomId, deriveKey,
   importPublicKey, exportPublicKey, generateECDHKeyPair, encryptPrivateKey,
@@ -84,6 +86,13 @@ function AppInner() {
   const [showNewDM,       setShowNewDM]       = useState(false);
   const [showNewGroup,    setShowNewGroup]    = useState(false);
   const [showGroupInvite, setShowGroupInvite] = useState(false);
+  const [showGroupInfo,   setShowGroupInfo]   = useState(false);
+  const [showProfile,     setShowProfile]     = useState(false);
+  const [myAvatar,        setMyAvatar]        = useState(() => {
+    const session = loadSavedSession();
+    if (!session?.nickname) return null;
+    return localStorage.getItem(`echo_avatar_${session.nickname.toLowerCase()}`) || null;
+  });
   const [derivingId,    setDerivingId]    = useState(null);
   const [deriveError,   setDeriveError]   = useState('');
 
@@ -539,11 +548,28 @@ function AppInner() {
   }, [activeSession, privateKey, account]);
 
   // ── Update chat preview (called from ChatScreen) ──────────────────────────────
-  const handleUpdateChat = useCallback((chatId, { lastMessage, lastTs }) => {
-    setDmList    (prev => prev.map(c => c.id === chatId ? { ...c, lastMessage, lastTs, unread: 0 } : c));
-    setGroupList (prev => prev.map(c => c.id === chatId ? { ...c, lastMessage, lastTs, unread: 0 } : c));
-    setLegacyList(prev => prev.map(c => c.id === chatId ? { ...c, lastMessage, lastTs, unread: 0 } : c));
+  const handleUpdateChat = useCallback((chatId, updates) => {
+    const { lastMessage, lastTs, name } = updates;
+    setDmList    (prev => prev.map(c => c.id === chatId ? { ...c, ...(lastMessage !== undefined && { lastMessage }), ...(lastTs !== undefined && { lastTs }), ...(name !== undefined && { name }), unread: 0 } : c));
+    setGroupList (prev => prev.map(c => c.id === chatId ? { ...c, ...(lastMessage !== undefined && { lastMessage }), ...(lastTs !== undefined && { lastTs }), ...(name !== undefined && { name }), unread: 0 } : c));
+    setLegacyList(prev => prev.map(c => c.id === chatId ? { ...c, ...(lastMessage !== undefined && { lastMessage }), ...(lastTs !== undefined && { lastTs }), unread: 0 } : c));
   }, []);
+
+  // ── Group info panel callbacks ────────────────────────────────────────────────
+  const handleGroupInfoUpdated = useCallback(({ name, avatar, left }) => {
+    if (left) {
+      setGroupList(prev => prev.filter(g => g.id !== activeSession?.groupId));
+      setActiveSession(null);
+      setActiveChatId(null);
+      setShowGroupInfo(false);
+      setShowSidebar(true);
+      return;
+    }
+    if (name) {
+      setGroupList(prev => prev.map(g => g.id === activeSession?.groupId ? { ...g, name } : g));
+      setActiveSession(prev => prev ? { ...prev, groupName: name } : prev);
+    }
+  }, [activeSession]);
 
   // ── DM Request accepted by me (recipient side) ────────────────────────────────
   const handleDMRequestAccepted = useCallback((dmId, fromNick) => {
@@ -604,6 +630,7 @@ function AppInner() {
       <div className={'sidebar-wrapper' + (showSidebar ? ' sidebar-wrapper--open' : '')}>
         <Sidebar
           account={account}
+          myAvatar={myAvatar}
           dmList={dmList}
           groupList={groupList}
           legacyList={legacyList}
@@ -615,6 +642,7 @@ function AppInner() {
           onNewGroup={() => setShowNewGroup(true)}
           onNewLegacy={() => { setDeriveError(''); setShowNewLegacy(true); }}
           onLogout={handleLogout}
+          onOpenProfile={() => setShowProfile(true)}
         />
       </div>
 
@@ -637,6 +665,7 @@ function AppInner() {
             onDMRequestAccepted={handleDMRequestAccepted}
             onDMAccepted={handleDMAccepted}
             onInviteToGroup={activeSession.type === 'group' ? () => setShowGroupInvite(true) : undefined}
+            onOpenGroupInfo={activeSession.type === 'group' ? () => setShowGroupInfo(true) : undefined}
           />
         ) : (
           <div className="app-welcome">
@@ -693,6 +722,25 @@ function AppInner() {
           myPubKeyB64={account.pubKeyB64}
           onCreated={handleGroupCreated}
           onClose={() => setShowNewGroup(false)}
+        />
+      )}
+
+      {showGroupInfo && activeSession?.type === 'group' && (
+        <GroupInfoPanel
+          groupId={activeSession.groupId}
+          myNick={account.nickname}
+          onClose={() => setShowGroupInfo(false)}
+          onGroupUpdated={handleGroupInfoUpdated}
+          onInvite={() => { setShowGroupInfo(false); setShowGroupInvite(true); }}
+        />
+      )}
+
+      {showProfile && (
+        <ProfileModal
+          nickname={account.nickname}
+          currentAvatar={myAvatar}
+          onClose={() => setShowProfile(false)}
+          onAvatarUpdated={(b64) => setMyAvatar(b64)}
         />
       )}
 
