@@ -135,6 +135,33 @@ export default function AuthScreen({ onAuth }) {
           console.warn('[auth] Server has pubKey but no local private key found. Messages may not decrypt.');
         }
 
+        // Auto-upgrade: if account has NO ECDH keys (legacy account), generate them now
+        if (!data.pubKey && !encryptedJson) {
+          try {
+            setStatusMsg('Генерация ключей шифрования...');
+            const keyPair   = await generateECDHKeyPair();
+            const pubKeyB64 = await exportPublicKey(keyPair.publicKey);
+            const encPrivKey = await encryptPrivateKey(keyPair.privateKey, password, authSalt);
+            localStorage.setItem(storageKey, encPrivKey);
+            await fetch('/auth/update-pubkey', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ nickname: nick, passwordHash, pubKey: pubKeyB64 }),
+            });
+            onAuth({
+              nickname:  data.nickname,
+              createdAt: data.createdAt,
+              authSalt:  authSalt,
+              pubKeyB64,
+              privateKey: keyPair.privateKey,
+            });
+            return;
+          } catch (upgradeErr) {
+            console.warn('[auth] ECDH key upgrade failed:', upgradeErr);
+            // Fall through to login without ECDH keys
+          }
+        }
+
         onAuth({
           nickname:   data.nickname,
           createdAt:  data.createdAt,

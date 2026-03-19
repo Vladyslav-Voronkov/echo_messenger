@@ -362,6 +362,11 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
 
     socket.on('connect', async () => {
       setStatus('online');
+      if (!cryptoKey) {
+        console.warn('[ChatScreen] cryptoKey is null — cannot join room');
+        setStatus('error');
+        return;
+      }
       const encNick = await encryptNick(cryptoKey, nickname);
       if (chatType === 'dm') {
         socket.emit('dm_join', { dmId: contextId, encNick });
@@ -552,7 +557,7 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
   }, [contextId, chatType, cryptoKey, nickname, loadHistory, recordActivityEvent]);
 
   const handleSend = useCallback(async (text) => {
-    if (!text.trim() || !socketRef.current?.connected) return;
+    if (!text.trim() || !socketRef.current?.connected || !cryptoKey) return;
 
     // /ai command — query ChatGPT, save result encrypted for all
     const trimmed = text.trim();
@@ -879,6 +884,16 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
       <div className={'scroll-date-label' + (showScrollDate ? ' scroll-date-label--visible' : '')}>
         {scrollDateLabel}
       </div>
+
+      {!cryptoKey && chatType !== 'legacy' && (
+        <div style={{
+          background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+          borderRadius: 10, padding: '12px 16px', margin: '8px 12px',
+          color: '#f87171', fontSize: 13, textAlign: 'center',
+        }}>
+          ⚠️ Ключи шифрования недоступны. Выйдите и войдите снова для генерации ключей.
+        </div>
+      )}
 
       {isPendingDM && chatType === 'dm' && session.otherNick && (
         <DmRequestBanner
