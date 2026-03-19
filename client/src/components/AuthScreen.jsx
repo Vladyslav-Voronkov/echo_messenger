@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import BuildBadge from './BuildBadge.jsx';
-import { useTranslation, LanguageSwitcher } from '../utils/i18n.jsx';
+import { useTranslation } from '../utils/i18n.jsx';
 import {
   generateAuthSalt,
   derivePasswordHash,
@@ -267,16 +267,6 @@ export default function AuthScreen({ onAuth }) {
             </div>
           )}
 
-          {tab === 'register' && (
-            <div style={{
-              fontSize: 12, color: 'var(--text-muted)',
-              background: 'rgba(79,142,247,0.08)', borderRadius: 8,
-              padding: '8px 12px', lineHeight: 1.5,
-            }}>
-              🔐 При регистрации генерируется ваша пара ключей ECDH P-256.
-              Приватный ключ шифруется паролем и хранится только у вас.
-            </div>
-          )}
 
           {statusMsg && (
             <p style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', margin: 0 }}>
@@ -298,15 +288,7 @@ export default function AuthScreen({ onAuth }) {
           </button>
         </form>
 
-        <div className="login-security-badges">
-          <span className="badge">{t('auth.badge_server')}</span>
-          <span className="badge">ECDH P-256</span>
-          <span className="badge">AES-256-GCM</span>
-          <span className="badge">Zero Knowledge</span>
-        </div>
-
         <BuildBadge />
-        <LanguageSwitcher />
       </div>
     </div>
   );

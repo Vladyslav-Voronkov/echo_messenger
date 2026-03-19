@@ -440,9 +440,15 @@ app.get('/dm/list', apiLimiter, async (req, res) => {
   // Enrich with last message timestamp
   const enriched = await Promise.all(dms.map(async d => {
     const lines = await readDmHistory(d.dmId);
-    let lastTs = null;
-    if (lines.length) { try { lastTs = JSON.parse(lines[lines.length - 1]).ts; } catch {} }
-    return { ...d, lastTs, msgCount: lines.length };
+    let lastTs = null, lastEncrypted = null;
+    if (lines.length) {
+      try {
+        const parsed = JSON.parse(lines[lines.length - 1]);
+        lastTs = parsed.ts;
+        lastEncrypted = parsed;
+      } catch {}
+    }
+    return { ...d, lastTs, msgCount: lines.length, lastEncrypted };
   }));
   return res.json({ dms: enriched, pending });
 });
@@ -550,9 +556,15 @@ app.get('/groups/list', apiLimiter, async (req, res) => {
   // Enrich with last message timestamp
   const enriched = await Promise.all(groups.map(async g => {
     const lines = await readGroupHistory(g.groupId);
-    let lastTs = null;
-    if (lines.length) { try { lastTs = JSON.parse(lines[lines.length - 1]).ts; } catch {} }
-    return { ...g, lastTs, msgCount: lines.length };
+    let lastTs = null, lastEncrypted = null;
+    if (lines.length) {
+      try {
+        const parsed = JSON.parse(lines[lines.length - 1]);
+        lastTs = parsed.ts;
+        lastEncrypted = parsed;
+      } catch {}
+    }
+    return { ...g, lastTs, msgCount: lines.length, lastEncrypted };
   }));
   return res.json({ groups: enriched });
 });

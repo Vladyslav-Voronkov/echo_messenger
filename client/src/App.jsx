@@ -13,6 +13,7 @@ import {
   deriveRoomId, deriveKey,
   importPublicKey, exportPublicKey, generateECDHKeyPair, encryptPrivateKey,
   deriveDMKey, deriveGroupWrapKey, unwrapGroupKey, wrapGroupKey,
+  decryptMessageObject,
 } from './utils/crypto.js';
 import { registerServiceWorker, subscribeToPush } from './utils/pushClient.js';
 import { LangProvider } from './utils/i18n.jsx';
@@ -20,6 +21,24 @@ import { LangProvider } from './utils/i18n.jsx';
 const SESSION_KEY  = 'echo_session';
 const SESSION_TTL  = 30 * 24 * 60 * 60 * 1000;
 const legacyKey    = (nick) => 'echo_chats_' + nick;
+
+// ── Preview decryption helper ─────────────────────────────────────────────────
+async function extractPreviewText(encObj, key) {
+  try {
+    const msg = await decryptMessageObject(key, encObj);
+    if (!msg) return null;
+    let text = msg.text || '';
+    try {
+      const p = JSON.parse(text);
+      if (p.type === 'image')  return '🖼 Фото';
+      if (p.type === 'album')  return `🖼 ${p.album?.images?.length || ''} фото`;
+      if (p.type === 'file')   return '📎 ' + (p.file?.name || 'Файл');
+      if (p.type === 'voice')  return '🎤 Голосовое';
+      if (typeof p.text === 'string') text = p.text;
+    } catch {}
+    return text || null;
+  } catch { return null; }
+}
 
 // ── Session helpers ────────────────────────────────────────────────────────────
 
@@ -122,7 +141,7 @@ function AppInner() {
   }, [legacyList, account?.nickname]);
 
   // ── Load DMs and Groups from server ──────────────────────────────────────────
-  const loadDMsAndGroups = useCallback(async (nick) => {
+  const loadDMsAndGroups = useCallback(async (nick, privKey = null) => {
     if (!nick) return;
     try {
       const [dmRes, grpRes, reqRes] = await Promise.all([
@@ -131,19 +150,21 @@ function AppInner() {
         fetch(`/dm/requests?nick=${encodeURIComponent(nick)}`),
       ]);
 
+      let dmsData = [], grpsData = [];
+
       if (dmRes.ok) {
         const { dms, pending } = await dmRes.json();
-        setDmList((dms || []).map(d => ({
+        dmsData = dms || [];
+        setDmList(dmsData.map(d => ({
           id:          d.dmId,
           type:        'dm',
           name:        '@' + d.other,
           dmId:        d.dmId,
           otherNick:   d.other,
-          lastMessage: d.msgCount > 0 ? '🔒 Зашифровано' : '',
+          lastMessage: d.msgCount > 0 ? '...' : '',
           lastTs:      d.lastTs || null,
           unread:      d.msgCount > 0 ? 1 : 0,
         })));
-        // Pending sent requests — show in DM list as pending
         if (pending?.length) {
           setDmList(prev => [
             ...prev,
@@ -158,7 +179,8 @@ function AppInner() {
 
       if (grpRes.ok) {
         const { groups } = await grpRes.json();
-        setGroupList((groups || []).map(g => ({
+        grpsData = groups || [];
+        setGroupList(grpsData.map(g => ({
           id:                g.groupId,
           type:              'group',
           name:              g.name,
@@ -166,7 +188,7 @@ function AppInner() {
           encryptedGroupKey: g.encryptedGroupKey,
           encryptedBy:       g.encryptedBy,
           isPending:         g.isPending,
-          lastMessage:       g.msgCount > 0 ? '🔒 Зашифровано' : '',
+          lastMessage:       g.msgCount > 0 ? '...' : '',
           lastTs:            g.lastTs || null,
           unread:            g.msgCount > 0 ? 1 : 0,
         })));
@@ -175,6 +197,55 @@ function AppInner() {
       if (reqRes.ok) {
         const { requests } = await reqRes.json();
         setDmRequests(requests || []);
+      }
+
+      // ── Background decrypt previews ──────────────────────────────────────────
+      if (privKey) {
+        // DM previews
+        (async () => {
+          for (const d of dmsData) {
+            if (!d.lastEncrypted) continue;
+            try {
+              const pubRes = await fetch(`/users/pubkey/${encodeURIComponent(d.other)}`);
+              const pubData = await pubRes.json();
+              if (!pubData.pubKey) continue;
+              const theirPub = await importPublicKey(pubData.pubKey);
+              const key  = await deriveDMKey(privKey, theirPub, nick, d.other);
+              const text = await extractPreviewText(d.lastEncrypted, key);
+              if (text) setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, lastMessage: text } : c));
+            } catch { /* skip */ }
+          }
+        })();
+
+        // Group previews
+        (async () => {
+          const session = loadSavedSession();
+          for (const g of grpsData) {
+            if (!g.lastEncrypted || !g.encryptedGroupKey) continue;
+            try {
+              const encBy  = (g.encryptedBy || '').toLowerCase();
+              const myNick = nick.toLowerCase();
+              let wrapKey;
+              if (encBy === myNick) {
+                if (session?.pubKeyB64) {
+                  const myPub = await importPublicKey(session.pubKeyB64);
+                  wrapKey = await deriveGroupWrapKey(privKey, myPub);
+                }
+              } else {
+                const pubRes = await fetch(`/users/pubkey/${encodeURIComponent(encBy)}`);
+                const pubData = await pubRes.json();
+                if (pubData.pubKey) {
+                  const encPub = await importPublicKey(pubData.pubKey);
+                  wrapKey = await deriveGroupWrapKey(privKey, encPub);
+                }
+              }
+              if (!wrapKey) continue;
+              const groupKey = await unwrapGroupKey(g.encryptedGroupKey, wrapKey);
+              const text = await extractPreviewText(g.lastEncrypted, groupKey);
+              if (text) setGroupList(prev => prev.map(c => c.id === g.groupId ? { ...c, lastMessage: text } : c));
+            } catch { /* skip */ }
+          }
+        })();
       }
     } catch (err) {
       console.warn('[app] Failed to load DMs/Groups:', err);
@@ -212,8 +283,8 @@ function AppInner() {
     // Register service worker + subscribe to push
     await registerServiceWorker();
     subscribeToPush(nick).catch(() => {});
-    // Load DMs and groups
-    await loadDMsAndGroups(nick);
+    // Load DMs and groups with key for preview decryption
+    await loadDMsAndGroups(nick, privKey);
   }, [loadDMsAndGroups]);
 
   const handleUnlocked = useCallback(async (privKey) => {

@@ -8,7 +8,7 @@ import WalletPanel from './WalletPanel.jsx';
 import BuildBadge from './BuildBadge.jsx';
 import { encryptMessage, encryptNick, decryptNick, decryptMessageObject } from '../utils/crypto.js';
 import { getNickColor } from '../utils/nickColor.js';
-import { useTranslation, interpolate, LanguageSwitcher } from '../utils/i18n.jsx';
+import { useTranslation, interpolate } from '../utils/i18n.jsx';
 import DmRequestBanner from './DmRequestBanner.jsx';
 
 // ── Date separator label ──────────────────────────────────────────────────────
@@ -171,7 +171,7 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
   const [visibleCount, setVisibleCount] = useState(BATCH);
   const [onlineCount, setOnlineCount] = useState(0);
   const [status, setStatus] = useState('connecting');
-  const [ping, setPing] = useState(null); // ms latency
+
   const [replyTo, setReplyTo] = useState(null);
   const [highlightId, setHighlightId] = useState(null);
   const [typingUsers, setTypingUsers] = useState(new Set());
@@ -197,7 +197,7 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
   const messagesRef = useRef([]);
   const sendReadRef = useRef(null);
   const likesRef = useRef({});
-  const pingIntervalRef = useRef(null);
+
   // Rolling window for suspicious activity detection
   const activityLogRef = useRef([]); // timestamps of join/leave events
   // v0.2.0: timer for hiding scroll date label
@@ -364,14 +364,6 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
     });
     socketRef.current = socket;
 
-    // Ping measurement
-    const measurePing = () => {
-      const t0 = Date.now();
-      socket.emit('ping_check', {}, () => {
-        setPing(Date.now() - t0);
-      });
-    };
-
     socket.on('connect', async () => {
       setStatus('online');
       if (!cryptoKey) {
@@ -388,17 +380,12 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
         socket.emit('join', { roomId: contextId, nick: encNick });
       }
       loadHistory();
-      // Start ping interval
-      setTimeout(measurePing, 500);
-      pingIntervalRef.current = setInterval(measurePing, 10000);
     });
     socket.on('disconnect', () => {
       setStatus('offline');
       setTypingUsers(new Set());
-      setPing(null);
-      clearInterval(pingIntervalRef.current);
     });
-    socket.on('connect_error', () => { setStatus('offline'); setPing(null); });
+    socket.on('connect_error', () => { setStatus('offline'); });
     socket.on('online_count', ({ count }) => setOnlineCount(count));
 
     const onIncomingMsg = async ({ encrypted }) => {
@@ -563,7 +550,6 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      clearInterval(pingIntervalRef.current);
       socket.disconnect();
     };
   }, [contextId, chatType, cryptoKey, nickname, loadHistory, recordActivityEvent]);
@@ -780,13 +766,6 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
   else if (typingArr.length === 2) typingLabel = interpolate(t('chat.typing_two'), { a: typingArr[0], b: typingArr[1] });
   else if (typingArr.length > 2) typingLabel = t('chat.typing_many');
 
-  // Ping label
-  const msLabel = t('chat.ms');
-  const pingLabel = ping === null ? null
-    : ping < 80 ? { text: ping + ' ' + msLabel, cls: 'ping-good' }
-    : ping < 200 ? { text: ping + ' ' + msLabel, cls: 'ping-ok' }
-    : { text: ping + ' ' + msLabel, cls: 'ping-bad' };
-
   return (
     <div className="chat-container">
 
@@ -821,22 +800,6 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
                   <IconWarning /> {t('chat.suspicious')}
                 </span>
               )}
-            </div>
-            <div className="header-meta-row">
-              <span className={`header-status-dot ${status === 'online' ? 'dot-online' : status === 'offline' ? 'dot-offline' : 'dot-connecting'}`} />
-              <span className="header-status-text">
-                {status === 'online' ? t('chat.status_online') : status === 'offline' ? t('chat.status_offline') : t('chat.status_connecting')}
-              </span>
-              {pingLabel && (
-                <>
-                  <span className="header-meta-sep">·</span>
-                  <span className={`header-ping ${pingLabel.cls}`}>{pingLabel.text}</span>
-                </>
-              )}
-              <span className="header-meta-sep">·</span>
-              <span className="header-enc-badge">
-                <IconLock /> AES-256
-              </span>
             </div>
           </div>
         </div>
@@ -874,7 +837,6 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
             <span>{nickname}</span>
           </div>
           <WalletPanel mode="compact" />
-          <LanguageSwitcher />
           <button className="logout-btn" onClick={onLogout} title={t('chat.logout_title')}>
             <IconLogout />
           </button>
