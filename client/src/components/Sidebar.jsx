@@ -159,6 +159,12 @@ export default function Sidebar({
 }) {
   const nickColor = getNickColor(account?.nickname || '');
   const [showLegacy, setShowLegacy] = useState(true);
+  // Force re-render every minute so relative timestamps ("2 мин") stay fresh
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <aside className="sidebar">

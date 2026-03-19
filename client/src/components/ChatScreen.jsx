@@ -510,6 +510,13 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
       }
     });
 
+    socket.on('user_avatar_updated', ({ nick, avatar }) => {
+      const key = nick.toLowerCase();
+      if (avatar) localStorage.setItem('echo_avatar_' + key, avatar);
+      else localStorage.removeItem('echo_avatar_' + key);
+      setPeerAvatars(prev => (prev[key] === avatar ? prev : { ...prev, [key]: avatar || null }));
+    });
+
     socket.on('group_system', ({ text, ts, subtype }) => {
       if (text) {
         setMessages(prev => [

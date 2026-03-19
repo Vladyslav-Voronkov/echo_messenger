@@ -81,6 +81,7 @@ function AppInner() {
   // Active chat
   const [activeChatId,  setActiveChatId]  = useState(null);
   const [activeSession, setActiveSession] = useState(null);
+  const activeChatIdRef = useRef(null);
 
   // UI state
   const [showSidebar,   setShowSidebar]   = useState(true);
@@ -97,6 +98,9 @@ function AppInner() {
   });
   const [derivingId,    setDerivingId]    = useState(null);
   const [deriveError,   setDeriveError]   = useState('');
+
+  // Keep activeChatIdRef in sync for use inside socket callbacks
+  useEffect(() => { activeChatIdRef.current = activeChatId; }, [activeChatId]);
 
   // Determine unlock state after mount
   useEffect(() => {
@@ -139,6 +143,35 @@ function AppInner() {
         if (prev.find(r => r.dmId === dmId)) return prev;
         return [...prev, { dmId, from: fromNick }];
       });
+    });
+
+    // Sidebar timestamp updates when messages arrive in non-active chats
+    socket.on('sidebar_update', ({ type, id, lastTs }) => {
+      const isActive = activeChatIdRef.current === id;
+      if (type === 'dm') {
+        setDmList(prev => prev.map(c => c.id === id
+          ? { ...c, lastTs, unread: isActive ? 0 : 1 } : c));
+      } else if (type === 'group') {
+        setGroupList(prev => prev.map(c => c.id === id
+          ? { ...c, lastTs, unread: isActive ? 0 : 1 } : c));
+      }
+    });
+
+    // Real-time avatar updates from other users
+    socket.on('user_avatar_updated', ({ nick, avatar }) => {
+      // Update localStorage cache
+      localStorage.setItem('echo_avatar_' + nick.toLowerCase(), avatar || '');
+      // Update DM list peer avatars
+      setDmList(prev => prev.map(c =>
+        c.otherNick?.toLowerCase() === nick.toLowerCase()
+          ? { ...c, peerAvatar: avatar || null } : c));
+    });
+
+    // Group avatar broadcast (already handled per-group via group_updated in ChatScreen,
+    // but update the sidebar list here too)
+    socket.on('group_updated', ({ groupId: gId, name, avatar }) => {
+      setGroupList(prev => prev.map(g => g.id === gId
+        ? { ...g, ...(name && { name }), ...(avatar !== undefined && { avatar }) } : g));
     });
 
     return () => socket.disconnect();
@@ -594,6 +627,9 @@ function AppInner() {
     if (name) {
       setGroupList(prev => prev.map(g => g.id === activeSession?.groupId ? { ...g, name } : g));
       setActiveSession(prev => prev ? { ...prev, groupName: name } : prev);
+    }
+    if (avatar !== undefined) {
+      setGroupList(prev => prev.map(g => g.id === activeSession?.groupId ? { ...g, avatar } : g));
     }
   }, [activeSession]);
 

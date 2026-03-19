@@ -401,6 +401,8 @@ app.post('/users/set-avatar', apiLimiter, async (req, res) => {
     if (!accounts[key]) return res.status(404).json({ error: 'User not found' });
     accounts[key].avatar = avatar;
     await saveAccounts(accounts);
+    // Broadcast to all clients so caches invalidate immediately
+    io.emit('user_avatar_updated', { nick: key, avatar });
     return res.json({ ok: true });
   } catch {
     return res.status(500).json({ error: 'Server error' });
@@ -1027,6 +1029,11 @@ io.on('connection', (socket) => {
     await appendDmMessage(dmId, line);
     io.to(dmId).emit('dm_message', { dmId, encrypted });
 
+    // Sidebar update for both participants (real-time lastTs without opening the chat)
+    for (const p of conv.participants) {
+      io.to(`user:${p}`).emit('sidebar_update', { type: 'dm', id: dmId, lastTs: encrypted.ts });
+    }
+
     // Push to recipient if not online in this DM
     if (fromNick && isValidNick(fromNick)) {
       const otherNick = conv.participants.find(p => p !== fromNick.toLowerCase());
@@ -1081,8 +1088,15 @@ io.on('connection', (socket) => {
     await appendGroupMessage(groupId, line);
     io.to(groupId).emit('group_message', { groupId, encrypted });
 
-    // Push to offline members
+    // Sidebar update for all group members
     const group = await loadGroup(groupId);
+    if (group) {
+      for (const memberNick of Object.keys(group.members)) {
+        io.to(`user:${memberNick}`).emit('sidebar_update', { type: 'group', id: groupId, lastTs: encrypted.ts });
+      }
+    }
+
+    // Push to offline members
     if (group && fromNick && isValidNick(fromNick)) {
       const grpRoom      = io.sockets.adapter.rooms.get(groupId);
       const onlineCount  = grpRoom?.size || 0;
