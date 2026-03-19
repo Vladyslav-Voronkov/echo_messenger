@@ -437,7 +437,14 @@ app.get('/dm/list', apiLimiter, async (req, res) => {
   if (!isValidNick(nick)) return res.status(400).json({ error: 'Invalid nick' });
   const dms     = listDMs(nick);
   const pending = listSentRequests(nick);
-  return res.json({ dms, pending });
+  // Enrich with last message timestamp
+  const enriched = await Promise.all(dms.map(async d => {
+    const lines = await readDmHistory(d.dmId);
+    let lastTs = null;
+    if (lines.length) { try { lastTs = JSON.parse(lines[lines.length - 1]).ts; } catch {} }
+    return { ...d, lastTs, msgCount: lines.length };
+  }));
+  return res.json({ dms: enriched, pending });
 });
 
 // GET /dm/history/:dmId
@@ -540,7 +547,14 @@ app.get('/groups/list', apiLimiter, async (req, res) => {
   const nick = (req.query.nick || '').trim();
   if (!isValidNick(nick)) return res.status(400).json({ error: 'Invalid nick' });
   const groups = await listGroupsForNick(nick);
-  return res.json({ groups });
+  // Enrich with last message timestamp
+  const enriched = await Promise.all(groups.map(async g => {
+    const lines = await readGroupHistory(g.groupId);
+    let lastTs = null;
+    if (lines.length) { try { lastTs = JSON.parse(lines[lines.length - 1]).ts; } catch {} }
+    return { ...g, lastTs, msgCount: lines.length };
+  }));
+  return res.json({ groups: enriched });
 });
 
 // GET /groups/info/:groupId

@@ -130,7 +130,7 @@ function ChatItem({ chat, isActive, isLoading, onSelect }) {
             {isLoading ? 'Подключение...' : (getPreview(chat.lastMessage) || (isPending ? 'Запрос на переписку' : 'Нет сообщений'))}
           </span>
           {chat.unread > 0 && (
-            <span className="sidebar-unread">{chat.unread > 99 ? '99+' : chat.unread}</span>
+            <span className="sidebar-unread-dot" />
           )}
         </div>
       </div>

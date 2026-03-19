@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import { io } from 'socket.io-client';
 import Message from './Message.jsx';
 import MessageInput from './MessageInput.jsx';
@@ -10,6 +10,18 @@ import { encryptMessage, encryptNick, decryptNick, decryptMessageObject } from '
 import { getNickColor } from '../utils/nickColor.js';
 import { useTranslation, interpolate, LanguageSwitcher } from '../utils/i18n.jsx';
 import DmRequestBanner from './DmRequestBanner.jsx';
+
+// ── Date separator label ──────────────────────────────────────────────────────
+function formatMsgDate(ts) {
+  const d    = new Date(ts);
+  const now  = new Date();
+  const toDay = (dt) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
+  if (toDay(d) === toDay(now)) return 'Сегодня';
+  if (toDay(d) === toDay(now) - 86400000) return 'Вчера';
+  const opts = { day: 'numeric', month: 'long' };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+  return d.toLocaleDateString('ru-RU', opts);
+}
 
 // In dev: Vite proxies /socket.io → localhost:3001 automatically.
 // In production: server serves the built client, so same origin = correct.
@@ -918,24 +930,38 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
         {visibleCount < messages.length && (
           <div className="load-more-hint">{t('chat.load_more')}</div>
         )}
-        {messages.slice(-visibleCount).map(msg => (
-          <Message
-            key={msg.id}
-            message={msg}
-            onReply={handleReply}
-            onScrollToMessage={handleScrollToMessage}
-            cryptoKey={cryptoKey}
-            highlighted={highlightId === msg.id}
-            socketRef={socketRef}
-            roomId={contextId}
-            nickname={nickname}
-            readReceipts={readReceipts}
-            likes={likes[msg.ts] || []}
-            onLike={handleLike}
-            pins={pins}
-            onPin={handlePin}
-          />
-        ))}
+        {(() => {
+          let lastDateStr = null;
+          return messages.slice(-visibleCount).map(msg => {
+            const dateStr = msg.ts ? new Date(msg.ts).toDateString() : null;
+            const showSep = dateStr && dateStr !== lastDateStr && msg.type !== 'system';
+            if (dateStr) lastDateStr = dateStr;
+            return (
+              <Fragment key={msg.id}>
+                {showSep && (
+                  <div className="msg-date-sep">
+                    <span>{formatMsgDate(msg.ts)}</span>
+                  </div>
+                )}
+                <Message
+                  message={msg}
+                  onReply={handleReply}
+                  onScrollToMessage={handleScrollToMessage}
+                  cryptoKey={cryptoKey}
+                  highlighted={highlightId === msg.id}
+                  socketRef={socketRef}
+                  roomId={contextId}
+                  nickname={nickname}
+                  readReceipts={readReceipts}
+                  likes={likes[msg.ts] || []}
+                  onLike={handleLike}
+                  pins={pins}
+                  onPin={handlePin}
+                />
+              </Fragment>
+            );
+          });
+        })()}
         <div ref={messagesEndRef} />
       </main>
 

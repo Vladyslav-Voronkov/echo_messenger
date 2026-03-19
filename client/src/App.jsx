@@ -139,9 +139,9 @@ function AppInner() {
           name:        '@' + d.other,
           dmId:        d.dmId,
           otherNick:   d.other,
-          lastMessage: '',
-          lastTs:      null,
-          unread:      0,
+          lastMessage: d.msgCount > 0 ? '🔒 Зашифровано' : '',
+          lastTs:      d.lastTs || null,
+          unread:      d.msgCount > 0 ? 1 : 0,
         })));
         // Pending sent requests — show in DM list as pending
         if (pending?.length) {
@@ -166,9 +166,9 @@ function AppInner() {
           encryptedGroupKey: g.encryptedGroupKey,
           encryptedBy:       g.encryptedBy,
           isPending:         g.isPending,
-          lastMessage:       '',
-          lastTs:            null,
-          unread:            0,
+          lastMessage:       g.msgCount > 0 ? '🔒 Зашифровано' : '',
+          lastTs:            g.lastTs || null,
+          unread:            g.msgCount > 0 ? 1 : 0,
         })));
       }
 
