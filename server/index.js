@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
 import multer from 'multer';
 import { initTelegram, forwardToTelegram } from './telegram.js';
+import { initApns, registerApnsToken, removeApnsToken, sendApnsPush } from './apnService.js';
 import { initPush, getVapidPublicKey, addSubscription, removeSubscription, sendPush } from './pushService.js';
 import { initDM, getDmId, createDM, acceptDM, declineDM, createRequest, getRequests, listDMs, listSentRequests, getConversation, appendDmMessage, readDmHistory } from './dmManager.js';
 import { initGroups, loadGroup, saveGroup, createGroup, inviteToGroup, acceptGroupInvite, declineGroupInvite, listGroupsForNick, appendGroupMessage, readGroupHistory, isMember, isValidGroupId, getGroupFilePath, renameGroup, removeMemberFromGroup, setGroupAvatar } from './groupManager.js';
@@ -33,6 +34,7 @@ await fs.mkdir(FILES_DIR, { recursive: true });
 await initPush(DATA_DIR);
 await initDM(DATA_DIR);
 await initGroups(DATA_DIR);
+initApns();
 
 // ── Express app ───────────────────────────────────────────────────────────────
 const app = express();
@@ -347,6 +349,41 @@ app.post('/auth/update-pubkey', apiLimiter, async (req, res) => {
     account.pubKey = pubKey || null;
     await saveAccounts(accounts);
     return res.json({ ok: true });
+  } catch {
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /auth/save-encrypted-key — store encrypted private key on server (backup for new devices)
+app.post('/auth/save-encrypted-key', apiLimiter, async (req, res) => {
+  const { nickname, passwordHash, encryptedPrivKey } = req.body || {};
+  if (!isValidNick(nickname) || !isValidHash(passwordHash) || !encryptedPrivKey) {
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+  try {
+    const accounts = await loadAccounts();
+    const key = nickname.trim().toLowerCase();
+    const account = accounts[key];
+    if (!account || account.passwordHash !== passwordHash) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    account.encryptedPrivKey = encryptedPrivKey;
+    await saveAccounts(accounts);
+    return res.json({ ok: true });
+  } catch {
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /auth/encrypted-key/:nick — download encrypted private key (still encrypted with user's password)
+app.get('/auth/encrypted-key/:nick', apiLimiter, async (req, res) => {
+  const nick = (req.params.nick || '').trim().toLowerCase();
+  if (!nick) return res.status(400).json({ error: 'Invalid nick' });
+  try {
+    const accounts = await loadAccounts();
+    const account = accounts[nick];
+    if (!account) return res.status(404).json({ error: 'Not found' });
+    return res.json({ encryptedPrivKey: account.encryptedPrivKey || null });
   } catch {
     return res.status(500).json({ error: 'Server error' });
   }
@@ -719,6 +756,28 @@ app.post('/push/unsubscribe', apiLimiter, async (req, res) => {
   return res.json({ ok: true });
 });
 
+// POST /push/native-subscribe — register APNs device token (iOS native app)
+app.post('/push/native-subscribe', apiLimiter, async (req, res) => {
+  const { nick, token, platform } = req.body || {};
+  if (!isValidNick(nick) || typeof token !== 'string' || !token) {
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+  if (platform === 'apns') {
+    registerApnsToken(nick.toLowerCase(), token);
+  }
+  return res.json({ ok: true });
+});
+
+// POST /push/native-unsubscribe — remove APNs device token
+app.post('/push/native-unsubscribe', apiLimiter, async (req, res) => {
+  const { nick, token } = req.body || {};
+  if (!isValidNick(nick) || typeof token !== 'string') {
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+  removeApnsToken(nick.toLowerCase(), token);
+  return res.json({ ok: true });
+});
+
 // ── Legacy chat history route ────────────────────────────────────────────────
 
 app.get('/history/:roomId', apiLimiter, async (req, res) => {
@@ -1047,6 +1106,7 @@ io.on('connection', (socket) => {
             url:   '/',
             tag:   `dm-${dmId}`,
           }).catch(() => {});
+          sendApnsPush(otherNick, `@${fromNick}`, 'Новое личное сообщение', { dmId }).catch(() => {});
         }
       }
     }
@@ -1111,6 +1171,7 @@ io.on('connection', (socket) => {
             url:   '/',
             tag:   `group-${groupId}`,
           }).catch(() => {});
+          sendApnsPush(memberNick, group.name || 'Группа', `@${fromNick}: новое сообщение`, { groupId }).catch(() => {});
         }
       }
     }

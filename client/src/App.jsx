@@ -16,6 +16,7 @@ import {
   importPublicKey, exportPublicKey, generateECDHKeyPair, encryptPrivateKey,
   deriveDMKey, deriveGroupWrapKey, unwrapGroupKey, wrapGroupKey,
   decryptMessageObject,
+  exportPrivateKeyJwk, importPrivateKeyJwk,
 } from './utils/crypto.js';
 import { registerServiceWorker, subscribeToPush } from './utils/pushClient.js';
 import { registerNativePush, isRunningNative } from './utils/nativePush.js';
@@ -107,10 +108,28 @@ function AppInner() {
   useEffect(() => {
     const session = loadSavedSession();
     if (!session) return;
-    // If account has ECDH keys on server, always require unlock/key-check
-    if (session.pubKeyB64) {
+    if (!session.pubKeyB64) return; // legacy account, no ECDH keys
+
+    const cacheKey = `echo_rawkey_${session.nickname.toLowerCase()}`;
+    const cachedJwk = localStorage.getItem(cacheKey);
+
+    if (cachedJwk) {
+      // Auto-load from cache — no password prompt (Telegram-style)
+      importPrivateKeyJwk(cachedJwk)
+        .then(privKey => {
+          setPrivateKey(privKey);
+          setNeedsUnlock(false);
+          afterKeyUnlocked(session.nickname, privKey);
+        })
+        .catch(() => {
+          // Cache corrupted — fall back to password
+          localStorage.removeItem(cacheKey);
+          setNeedsUnlock(true);
+        });
+    } else {
       setNeedsUnlock(true);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Global notification socket ─────────────────────────────────────────────
@@ -324,6 +343,10 @@ function AppInner() {
     if (accountData.privateKey && accountData.privateKey !== '__needs_unlock__') {
       setPrivateKey(accountData.privateKey);
       setNeedsUnlock(false);
+      // Cache so page refresh skips unlock screen
+      exportPrivateKeyJwk(accountData.privateKey)
+        .then(jwk => localStorage.setItem(`echo_rawkey_${toSave.nickname.toLowerCase()}`, jwk))
+        .catch(() => {});
       afterKeyUnlocked(toSave.nickname, accountData.privateKey);
     } else if (accountData.privateKey === '__needs_unlock__') {
       // Login — has a stored private key, needs unlock
@@ -347,13 +370,23 @@ function AppInner() {
     await loadDMsAndGroups(nick, privKey);
   }, [loadDMsAndGroups]);
 
+  const cachePrivateKey = useCallback((nick, privKey) => {
+    if (!nick || !privKey) return;
+    exportPrivateKeyJwk(privKey)
+      .then(jwk => localStorage.setItem(`echo_rawkey_${nick.toLowerCase()}`, jwk))
+      .catch(() => {});
+  }, []);
+
   const handleUnlocked = useCallback(async (privKey) => {
     setPrivateKey(privKey);
     setNeedsUnlock(false);
+    if (privKey) cachePrivateKey(account?.nickname, privKey);
     await afterKeyUnlocked(account?.nickname, privKey);
-  }, [account, afterKeyUnlocked]);
+  }, [account, afterKeyUnlocked, cachePrivateKey]);
 
   const handleLogout = useCallback(() => {
+    const nick = account?.nickname?.toLowerCase();
+    if (nick) localStorage.removeItem(`echo_rawkey_${nick}`);
     localStorage.removeItem(SESSION_KEY);
     setAccount(null);
     setPrivateKey(null);
@@ -364,7 +397,7 @@ function AppInner() {
     setGroupList([]);
     setDmRequests([]);
     setLegacyList([]);
-  }, []);
+  }, [account]);
 
   // ── Open a Legacy chat (seed-phrase) ──────────────────────────────────────────
   const deriveAndOpenLegacy = useCallback(async (chat) => {
