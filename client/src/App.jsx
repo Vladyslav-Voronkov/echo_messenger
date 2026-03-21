@@ -244,72 +244,64 @@ function AppInner() {
         setDmRequests(requests || []);
       }
 
-      // ── Background decrypt previews ──────────────────────────────────────────
+      // ── Background decrypt previews + avatars (parallel, one pubkey fetch per DM) ──
       if (privKey) {
-        // DM previews
-        (async () => {
-          for (const d of dmsData) {
-            if (!d.lastEncrypted) continue;
-            try {
-              const pubRes = await fetch(`/users/pubkey/${encodeURIComponent(d.other)}`);
-              const pubData = await pubRes.json();
-              if (!pubData.pubKey) continue;
-              const theirPub = await importPublicKey(pubData.pubKey);
+        // DM: one pubkey fetch per contact, do preview + avatar together
+        Promise.all(dmsData.map(async (d) => {
+          try {
+            const cached = localStorage.getItem('echo_avatar_' + d.other.toLowerCase());
+            if (cached) setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, peerAvatar: cached } : c));
+
+            if (!d.lastEncrypted && cached) return; // nothing more to do
+
+            const pubRes  = await fetch(`/users/pubkey/${encodeURIComponent(d.other)}`);
+            const pubData = await pubRes.json();
+            if (!pubData.pubKey) return;
+
+            const theirPub = await importPublicKey(pubData.pubKey);
+
+            // Avatar
+            if (!cached && pubData.avatar) {
+              localStorage.setItem('echo_avatar_' + d.other.toLowerCase(), pubData.avatar);
+              setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, peerAvatar: pubData.avatar } : c));
+            }
+
+            // Preview
+            if (d.lastEncrypted) {
               const key  = await deriveDMKey(privKey, theirPub, nick, d.other);
               const text = await extractPreviewText(d.lastEncrypted, key);
               if (text) setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, lastMessage: text } : c));
-            } catch { /* skip */ }
-          }
-        })();
+            }
+          } catch { /* skip */ }
+        }));
 
-        // Peer avatar loading for DMs
-        (async () => {
-          for (const d of dmsData) {
-            try {
-              const cached = localStorage.getItem('echo_avatar_' + d.other.toLowerCase());
-              if (cached) {
-                setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, peerAvatar: cached } : c));
-                continue;
+        // Group previews (parallel)
+        Promise.all(grpsData.map(async (g) => {
+          if (!g.lastEncrypted || !g.encryptedGroupKey) return;
+          try {
+            const session = loadSavedSession();
+            const encBy  = (g.encryptedBy || '').toLowerCase();
+            const myNick = nick.toLowerCase();
+            let wrapKey;
+            if (encBy === myNick) {
+              if (session?.pubKeyB64) {
+                const myPub = await importPublicKey(session.pubKeyB64);
+                wrapKey = await deriveGroupWrapKey(privKey, myPub);
               }
-              const pubRes = await fetch(`/users/pubkey/${encodeURIComponent(d.other)}`);
+            } else {
+              const pubRes = await fetch(`/users/pubkey/${encodeURIComponent(encBy)}`);
               const pubData = await pubRes.json();
-              if (pubData.avatar) {
-                localStorage.setItem('echo_avatar_' + d.other.toLowerCase(), pubData.avatar);
-                setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, peerAvatar: pubData.avatar } : c));
+              if (pubData.pubKey) {
+                const encPub = await importPublicKey(pubData.pubKey);
+                wrapKey = await deriveGroupWrapKey(privKey, encPub);
               }
-            } catch { /* skip */ }
-          }
-        })();
-
-        // Group previews
-        (async () => {
-          const session = loadSavedSession();
-          for (const g of grpsData) {
-            if (!g.lastEncrypted || !g.encryptedGroupKey) continue;
-            try {
-              const encBy  = (g.encryptedBy || '').toLowerCase();
-              const myNick = nick.toLowerCase();
-              let wrapKey;
-              if (encBy === myNick) {
-                if (session?.pubKeyB64) {
-                  const myPub = await importPublicKey(session.pubKeyB64);
-                  wrapKey = await deriveGroupWrapKey(privKey, myPub);
-                }
-              } else {
-                const pubRes = await fetch(`/users/pubkey/${encodeURIComponent(encBy)}`);
-                const pubData = await pubRes.json();
-                if (pubData.pubKey) {
-                  const encPub = await importPublicKey(pubData.pubKey);
-                  wrapKey = await deriveGroupWrapKey(privKey, encPub);
-                }
-              }
-              if (!wrapKey) continue;
-              const groupKey = await unwrapGroupKey(g.encryptedGroupKey, wrapKey);
-              const text = await extractPreviewText(g.lastEncrypted, groupKey);
-              if (text) setGroupList(prev => prev.map(c => c.id === g.groupId ? { ...c, lastMessage: text } : c));
-            } catch { /* skip */ }
-          }
-        })();
+            }
+            if (!wrapKey) return;
+            const groupKey = await unwrapGroupKey(g.encryptedGroupKey, wrapKey);
+            const text = await extractPreviewText(g.lastEncrypted, groupKey);
+            if (text) setGroupList(prev => prev.map(c => c.id === g.groupId ? { ...c, lastMessage: text } : c));
+          } catch { /* skip */ }
+        }));
       }
     } catch (err) {
       console.warn('[app] Failed to load DMs/Groups:', err);
