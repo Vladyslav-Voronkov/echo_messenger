@@ -1048,6 +1048,7 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
           onCancelReply={handleCancelReply}
           cryptoKey={cryptoKey}
           roomId={contextId}
+          chatType={chatType}
           socketRef={socketRef}
         />
         <BuildBadge />

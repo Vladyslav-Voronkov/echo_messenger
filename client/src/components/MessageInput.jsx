@@ -15,7 +15,17 @@ function formatRecTime(secs) {
   return m + ':' + String(s).padStart(2, '0');
 }
 
-export default function MessageInput({ onSend, onTyping, disabled, nickname, replyTo, onCancelReply, cryptoKey, roomId, socketRef }) {
+function emitMedia(socketRef, chatType, roomId, nickname, encrypted) {
+  if (chatType === 'dm') {
+    socketRef.current.emit('dm_message', { dmId: roomId, encrypted, fromNick: nickname });
+  } else if (chatType === 'group') {
+    socketRef.current.emit('group_message', { groupId: roomId, encrypted, fromNick: nickname });
+  } else {
+    socketRef.current.emit('message', { roomId, encrypted });
+  }
+}
+
+export default function MessageInput({ onSend, onTyping, disabled, nickname, replyTo, onCancelReply, cryptoKey, roomId, chatType = 'legacy', socketRef }) {
   const { t } = useTranslation();
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -188,10 +198,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
 
       const encNick2 = await encryptNick(cryptoKey, nickname);
       const { iv: msgIv, data: msgData } = await encryptMessage(cryptoKey, payload);
-      socketRef.current.emit('message', {
-        roomId,
-        encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick2 },
-      });
+      emitMedia(socketRef, chatType, roomId, nickname, { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick2 });
 
       setUploadProgress({ pct: 100, label: t('input.progress_done') });
       setTimeout(() => setUploadProgress(null), 800);
@@ -264,10 +271,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
         file: { fileId, name: file.name, mime: file.type || 'application/octet-stream', size: file.size },
       });
       const { iv: msgIv, data: msgData } = await encryptMessage(cryptoKey, payload);
-      socketRef.current.emit('message', {
-        roomId,
-        encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick },
-      });
+      emitMedia(socketRef, chatType, roomId, nickname, { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick });
       setUploadProgress({ pct: 100, label: t('input.progress_done') });
       setTimeout(() => setUploadProgress(null), 800);
     } catch (err) {
@@ -405,10 +409,7 @@ export default function MessageInput({ onSend, onTyping, disabled, nickname, rep
           voice: { fileId, mime: mimeType, duration: Math.max(1, duration) },
         });
         const { iv: msgIv, data: msgData } = await encryptMessage(cryptoKey, payload);
-        socketRef.current.emit('message', {
-          roomId,
-          encrypted: { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick },
-        });
+        emitMedia(socketRef, chatType, roomId, nickname, { iv: msgIv, data: msgData, ts: Date.now(), nick: encNick });
         setUploadProgress({ pct: 100, label: t('input.progress_done') });
         setTimeout(() => setUploadProgress(null), 800);
       } catch (err) {

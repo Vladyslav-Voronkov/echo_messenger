@@ -1,16 +1,27 @@
 import { useState } from 'react';
-import { decryptPrivateKey } from '../utils/crypto.js';
 import BuildBadge from './BuildBadge.jsx';
+import {
+  decryptPrivateKey,
+  derivePasswordHash,
+  generateECDHKeyPair,
+  exportPublicKey,
+  encryptPrivateKey,
+} from '../utils/crypto.js';
 
 /**
  * UnlockScreen — shown when a session exists but the ECDH private key
  * has not been decrypted yet. User must enter their password to unlock.
+ *
+ * If the encrypted key is missing from localStorage (e.g. new device),
+ * we generate a fresh ECDH key pair, encrypt it, store it, and update
+ * the server's public key — so the account works on this device.
  */
-export default function UnlockScreen({ nickname, onUnlocked, onLogout }) {
+export default function UnlockScreen({ nickname, authSalt, onUnlocked, onLogout }) {
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
 
   const handleUnlock = async (e) => {
     e.preventDefault();
@@ -18,24 +29,61 @@ export default function UnlockScreen({ nickname, onUnlocked, onLogout }) {
 
     setLoading(true);
     setError('');
+    setStatusMsg('');
 
     try {
       const storageKey    = `echo_privkey_${nickname.toLowerCase()}`;
       const encryptedJson = localStorage.getItem(storageKey);
 
       if (!encryptedJson) {
-        // No local key — could be old account without ECDH keys.
-        // Unlock without key (legacy mode).
-        onUnlocked(null);
+        // No local key — generate a new ECDH key pair for this device
+        setStatusMsg('Генерация ключей шифрования...');
+
+        if (!authSalt) {
+          // Fetch authSalt from server if not in session
+          const saltRes = await fetch(`/auth/salt/${encodeURIComponent(nickname)}`);
+          if (!saltRes.ok) throw new Error('Не удалось получить данные аккаунта');
+        }
+
+        const salt = authSalt || (() => { throw new Error('Нет authSalt'); })();
+        const passwordHash = await derivePasswordHash(password, salt);
+
+        // Verify password against server before generating new keys
+        setStatusMsg('Проверка пароля...');
+        const loginRes = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nickname, passwordHash }),
+        });
+        if (!loginRes.ok) {
+          const d = await loginRes.json();
+          throw new Error(d.error || 'Неверный пароль');
+        }
+
+        setStatusMsg('Генерация новых ключей...');
+        const keyPair   = await generateECDHKeyPair();
+        const pubKeyB64 = await exportPublicKey(keyPair.publicKey);
+        const encPrivKey = await encryptPrivateKey(keyPair.privateKey, password, salt);
+        localStorage.setItem(storageKey, encPrivKey);
+
+        // Update public key on server
+        await fetch('/auth/update-pubkey', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nickname, passwordHash, pubKey: pubKeyB64 }),
+        });
+
+        onUnlocked(keyPair.privateKey);
         return;
       }
 
       const privateKey = await decryptPrivateKey(encryptedJson, password);
       onUnlocked(privateKey);
-    } catch {
-      setError('Неверный пароль');
+    } catch (err) {
+      setError(err.message || 'Неверный пароль');
     } finally {
       setLoading(false);
+      setStatusMsg('');
     }
   };
 
@@ -79,6 +127,7 @@ export default function UnlockScreen({ nickname, onUnlocked, onLogout }) {
             </div>
           </div>
 
+          {statusMsg && <p style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', margin: '4px 0' }}>{statusMsg}</p>}
           {error && <p className="login-error">{error}</p>}
 
           <button
@@ -87,7 +136,7 @@ export default function UnlockScreen({ nickname, onUnlocked, onLogout }) {
             disabled={loading || !password}
           >
             {loading
-              ? <span className="btn-loading"><span className="spinner" /> Разблокировка...</span>
+              ? <span className="btn-loading"><span className="spinner" /> {statusMsg || 'Разблокировка...'}</span>
               : '🔓 Разблокировать'}
           </button>
         </form>

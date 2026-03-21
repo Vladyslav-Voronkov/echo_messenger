@@ -107,10 +107,9 @@ function AppInner() {
   useEffect(() => {
     const session = loadSavedSession();
     if (!session) return;
-    // Check if account has ECDH keys (pubKeyB64 stored in session)
+    // If account has ECDH keys on server, always require unlock/key-check
     if (session.pubKeyB64) {
-      const storedKey = localStorage.getItem(`echo_privkey_${session.nickname.toLowerCase()}`);
-      if (storedKey) setNeedsUnlock(true); // has stored key — needs unlock
+      setNeedsUnlock(true);
     }
   }, []);
 
@@ -678,6 +677,7 @@ function AppInner() {
     return (
       <UnlockScreen
         nickname={account.nickname}
+        authSalt={account.authSalt}
         onUnlocked={handleUnlocked}
         onLogout={handleLogout}
       />
