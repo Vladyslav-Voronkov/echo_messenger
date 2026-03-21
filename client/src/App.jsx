@@ -18,6 +18,7 @@ import {
   decryptMessageObject,
 } from './utils/crypto.js';
 import { registerServiceWorker, subscribeToPush } from './utils/pushClient.js';
+import { registerNativePush, isRunningNative } from './utils/nativePush.js';
 import { LangProvider } from './utils/i18n.jsx';
 
 const SESSION_KEY  = 'echo_session';
@@ -106,10 +107,9 @@ function AppInner() {
   useEffect(() => {
     const session = loadSavedSession();
     if (!session) return;
-    // Check if account has ECDH keys (pubKeyB64 stored in session)
+    // If account has ECDH keys on server, always require unlock/key-check
     if (session.pubKeyB64) {
-      const storedKey = localStorage.getItem(`echo_privkey_${session.nickname.toLowerCase()}`);
-      if (storedKey) setNeedsUnlock(true); // has stored key — needs unlock
+      setNeedsUnlock(true);
     }
   }, []);
 
@@ -344,9 +344,13 @@ function AppInner() {
   }, [loadDMsAndGroups]);
 
   const afterKeyUnlocked = useCallback(async (nick, privKey) => {
-    // Register service worker + subscribe to push
-    await registerServiceWorker();
-    subscribeToPush(nick).catch(() => {});
+    // Register for push notifications (native iOS or web)
+    if (isRunningNative()) {
+      registerNativePush(nick).catch(() => {});
+    } else {
+      await registerServiceWorker();
+      subscribeToPush(nick).catch(() => {});
+    }
     // Load DMs and groups with key for preview decryption
     await loadDMsAndGroups(nick, privKey);
   }, [loadDMsAndGroups]);
@@ -673,6 +677,7 @@ function AppInner() {
     return (
       <UnlockScreen
         nickname={account.nickname}
+        authSalt={account.authSalt}
         onUnlocked={handleUnlocked}
         onLogout={handleLogout}
       />
