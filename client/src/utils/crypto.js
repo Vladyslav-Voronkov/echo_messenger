@@ -178,6 +178,18 @@ export async function decryptPrivateKey(encryptedJson, password) {
   return crypto.subtle.importKey('jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']);
 }
 
+/** Export private key to raw JWK string (for local session cache). */
+export async function exportPrivateKeyJwk(privateKey) {
+  const jwk = await crypto.subtle.exportKey('jwk', privateKey);
+  return JSON.stringify(jwk);
+}
+
+/** Import private key from raw JWK string. */
+export async function importPrivateKeyJwk(jwkStr) {
+  const jwk = JSON.parse(jwkStr);
+  return crypto.subtle.importKey('jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']);
+}
+
 // ── ECDH shared key derivation ────────────────────────────────────────────────
 
 /**

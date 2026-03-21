@@ -66,12 +66,17 @@ export default function UnlockScreen({ nickname, authSalt, onUnlocked, onLogout 
         const encPrivKey = await encryptPrivateKey(keyPair.privateKey, password, salt);
         localStorage.setItem(storageKey, encPrivKey);
 
-        // Update public key on server
+        // Update public key and backup encrypted key on server
         await fetch('/auth/update-pubkey', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nickname, passwordHash, pubKey: pubKeyB64 }),
         });
+        fetch('/auth/save-encrypted-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nickname, passwordHash, encryptedPrivKey: encPrivKey }),
+        }).catch(() => {});
 
         onUnlocked(keyPair.privateKey);
         return;

@@ -87,10 +87,17 @@ export default function AuthScreen({ onAuth }) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Registration error');
 
-        // 4. Encrypt private key with password and store in localStorage
+        // 4. Encrypt private key with password and store in localStorage + server backup
         setStatusMsg('Сохранение ключей...');
         const encryptedPrivKey = await encryptPrivateKey(keyPair.privateKey, password, authSalt);
         localStorage.setItem(`echo_privkey_${nick.toLowerCase()}`, encryptedPrivKey);
+
+        // Backup encrypted key to server so other devices can download it
+        fetch('/auth/save-encrypted-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nickname: nick, passwordHash, encryptedPrivKey }),
+        }).catch(() => {});
 
         onAuth({
           nickname:   data.nickname,
@@ -123,16 +130,27 @@ export default function AuthScreen({ onAuth }) {
         // 4. Try to decrypt private key from localStorage
         let privateKey = null;
         const storageKey = `echo_privkey_${nick.toLowerCase()}`;
-        const encryptedJson = localStorage.getItem(storageKey);
+        let encryptedJson = localStorage.getItem(storageKey);
+
+        // If no local key but server has pubKey → try to download encrypted key backup
+        if (!encryptedJson && data.pubKey) {
+          setStatusMsg('Загрузка ключей шифрования...');
+          try {
+            const keyRes = await fetch(`/auth/encrypted-key/${encodeURIComponent(nick)}`);
+            if (keyRes.ok) {
+              const keyData = await keyRes.json();
+              if (keyData.encryptedPrivKey) {
+                localStorage.setItem(storageKey, keyData.encryptedPrivKey);
+                encryptedJson = keyData.encryptedPrivKey;
+              }
+            }
+          } catch { /* server backup not available */ }
+        }
+
         if (encryptedJson) {
           // Decrypt happens in UnlockScreen (so we don't do it here)
           // Just signal that we need unlock
           privateKey = '__needs_unlock__';
-        }
-
-        // If account has pubKey but no local private key → generate a warning
-        if (data.pubKey && !encryptedJson) {
-          console.warn('[auth] Server has pubKey but no local private key found. Messages may not decrypt.');
         }
 
         // Auto-upgrade: if account has NO ECDH keys (legacy account), generate them now
@@ -143,6 +161,12 @@ export default function AuthScreen({ onAuth }) {
             const pubKeyB64 = await exportPublicKey(keyPair.publicKey);
             const encPrivKey = await encryptPrivateKey(keyPair.privateKey, password, authSalt);
             localStorage.setItem(storageKey, encPrivKey);
+            // Save to server for cross-device access
+            fetch('/auth/save-encrypted-key', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ nickname: nick, passwordHash, encryptedPrivKey: encPrivKey }),
+            }).catch(() => {});
             await fetch('/auth/update-pubkey', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
