@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import AdminBadge from './AdminBadge.jsx';
 
-export default function AdminPanel({ nickname, passwordHash, adminInfo, onClose, onUpdated }) {
+export default function AdminPanel({ sessionToken, adminInfo, onClose, onUpdated }) {
   const [newAdmin, setNewAdmin] = useState('');
   const [loading, setLoading]  = useState(false);
   const [error, setError]      = useState('');
@@ -13,8 +13,8 @@ export default function AdminPanel({ nickname, passwordHash, adminInfo, onClose,
     try {
       const res = await fetch('/admin/grant', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nickname, passwordHash, targetNick: target }),
+        headers: { 'Content-Type': 'application/json', 'x-session-token': sessionToken },
+        body: JSON.stringify({ targetNick: target }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || 'Ошибка'); return; }
@@ -29,8 +29,8 @@ export default function AdminPanel({ nickname, passwordHash, adminInfo, onClose,
     try {
       const res = await fetch('/admin/revoke', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nickname, passwordHash, targetNick }),
+        headers: { 'Content-Type': 'application/json', 'x-session-token': sessionToken },
+        body: JSON.stringify({ targetNick }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || 'Ошибка'); return; }

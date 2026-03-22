@@ -69,7 +69,7 @@ function fileExt(name) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function VaultPanel({ nickname, passwordHash, isSuperAdmin, adminInfo, onManageAdmins }) {
+export default function VaultPanel({ nickname, sessionToken, isSuperAdmin, adminInfo, onManageAdmins }) {
   const [vaultKey, setVaultKey]       = useState(null);
   const [passphrase, setPassphrase]   = useState('');
   const [unlockError, setUnlockError] = useState('');
@@ -95,7 +95,7 @@ export default function VaultPanel({ nickname, passwordHash, isSuperAdmin, admin
   useEffect(() => { vaultKeyRef.current = vaultKey; }, [vaultKey]);
 
   // ── Auth headers for API calls ─────────────────────────────────────────────
-  const authHeaders = { 'x-nickname': nickname.toLowerCase(), 'x-password-hash': passwordHash };
+  const authHeaders = { 'x-session-token': sessionToken };
 
   // ── Load metadata from server ──────────────────────────────────────────────
   const loadMeta = useCallback(async (key) => {
@@ -112,7 +112,7 @@ export default function VaultPanel({ nickname, passwordHash, isSuperAdmin, admin
     } finally {
       setLoading(false);
     }
-  }, [nickname, passwordHash]);
+  }, [sessionToken]);
 
   // ── Save metadata to server ────────────────────────────────────────────────
   const saveMeta = useCallback(async (newItems, key) => {
@@ -121,10 +121,10 @@ export default function VaultPanel({ nickname, passwordHash, isSuperAdmin, admin
     const encrypted = await encryptVaultData(k, newItems);
     await fetch('/vault/meta', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nickname, passwordHash, meta: encrypted }),
+      headers: { 'Content-Type': 'application/json', 'x-session-token': sessionToken },
+      body: JSON.stringify({ meta: encrypted }),
     });
-  }, [nickname, passwordHash]);
+  }, [sessionToken]);
 
   // ── Unlock vault ───────────────────────────────────────────────────────────
   const handleUnlock = async () => {
@@ -251,8 +251,8 @@ export default function VaultPanel({ nickname, passwordHash, isSuperAdmin, admin
       if (target?.type === 'file') {
         await fetch(`/vault/file/${id}`, {
           method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nickname, passwordHash }),
+          headers: { 'Content-Type': 'application/json', 'x-session-token': sessionToken },
+          body: JSON.stringify({}),
         });
       }
     }

@@ -24,8 +24,6 @@ export default function ProfileModal({ nickname, currentAvatar, onClose, onAvata
           body: JSON.stringify({ nick: nickname, avatar: b64 }),
         });
         if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Ошибка'); }
-        // Cache in localStorage
-        localStorage.setItem(`echo_avatar_${nickname.toLowerCase()}`, b64);
         onAvatarUpdated?.(b64);
       } catch (err) { setError(err.message); setPreview(currentAvatar || null); }
       finally { setSaving(false); }
