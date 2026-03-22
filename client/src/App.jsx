@@ -25,8 +25,9 @@ import { registerServiceWorker, subscribeToPush } from './utils/pushClient.js';
 import { registerNativePush, isRunningNative } from './utils/nativePush.js';
 import { LangProvider } from './utils/i18n.jsx';
 
-const SESSION_KEY  = 'echo_session';
-const SESSION_TTL  = 30 * 24 * 60 * 60 * 1000;
+const SESSION_KEY   = 'echo_session';
+const SESSION_HASH  = 'echo_session_hash'; // sessionStorage only (cleared on tab close)
+const SESSION_TTL   = 30 * 24 * 60 * 60 * 1000;
 const legacyKey    = (nick) => 'echo_chats_' + nick;
 const getLastSeen = (chatId) => parseInt(localStorage.getItem('echo_ls_' + chatId) || '0', 10);
 const markSeen   = (chatId, ts) => { if (chatId && ts) localStorage.setItem('echo_ls_' + chatId, String(ts)); };
@@ -73,7 +74,13 @@ function loadLegacyChats(nickname) {
 }
 
 function AppInner() {
-  const [account,      setAccount]      = useState(loadSavedSession);
+  const [account,      setAccount]      = useState(() => {
+    const s = loadSavedSession();
+    if (!s) return null;
+    // Restore passwordHash from sessionStorage if available (survives page refresh, not tab close)
+    const hash = sessionStorage.getItem(SESSION_HASH);
+    return hash ? { ...s, passwordHash: hash } : s;
+  });
   const [privateKey,   setPrivateKey]   = useState(null);  // ECDH CryptoKey in memory
   const [needsUnlock,  setNeedsUnlock]  = useState(false); // session exists, key not yet unlocked
 
@@ -342,7 +349,8 @@ function AppInner() {
       pubKeyB64:  accountData.pubKeyB64 || null,
     };
     saveSavedSession(toSave);
-    // Keep passwordHash in memory only (not localStorage) for vault/admin auth
+    // Keep passwordHash in sessionStorage (survives refresh, cleared on tab close)
+    if (accountData.passwordHash) sessionStorage.setItem(SESSION_HASH, accountData.passwordHash);
     setAccount({ ...toSave, passwordHash: accountData.passwordHash || null });
     setLegacyList(loadLegacyChats(accountData.nickname));
 
@@ -397,6 +405,7 @@ function AppInner() {
     const nick = account?.nickname?.toLowerCase();
     if (nick) localStorage.removeItem(`echo_rawkey_${nick}`);
     localStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_HASH);
     setAccount(null);
     setPrivateKey(null);
     setNeedsUnlock(false);
