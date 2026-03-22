@@ -296,11 +296,9 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
     const unique = [...new Set(toFetch)];
     for (const nick of unique) {
       fetchedNicksRef.current.add(nick);
-      const cached = localStorage.getItem('echo_avatar_' + nick);
-      if (cached) { setPeerAvatars(prev => ({ ...prev, [nick]: cached })); continue; }
       fetch(`/users/pubkey/${encodeURIComponent(nick)}`)
         .then(r => r.json())
-        .then(d => { if (d.avatar) { localStorage.setItem('echo_avatar_' + nick, d.avatar); setPeerAvatars(prev => ({ ...prev, [nick]: d.avatar })); } })
+        .then(d => { if (d.avatar) { setPeerAvatars(prev => ({ ...prev, [nick]: d.avatar })); } })
         .catch(() => {});
     }
   }, [messages, chatType]);
@@ -512,8 +510,6 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
 
     socket.on('user_avatar_updated', ({ nick, avatar }) => {
       const key = nick.toLowerCase();
-      if (avatar) localStorage.setItem('echo_avatar_' + key, avatar);
-      else localStorage.removeItem('echo_avatar_' + key);
       setPeerAvatars(prev => (prev[key] === avatar ? prev : { ...prev, [key]: avatar || null }));
     });
 

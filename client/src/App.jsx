@@ -27,6 +27,7 @@ import { LangProvider } from './utils/i18n.jsx';
 
 const SESSION_KEY   = 'echo_session';
 const SESSION_HASH  = 'echo_session_hash'; // sessionStorage only (cleared on tab close)
+const SESSION_TOKEN = 'echo_token'; // persists in localStorage
 const SESSION_TTL   = 30 * 24 * 60 * 60 * 1000;
 const legacyKey    = (nick) => 'echo_chats_' + nick;
 const getLastSeen = (chatId) => parseInt(localStorage.getItem('echo_ls_' + chatId) || '0', 10);
@@ -106,11 +107,8 @@ function AppInner() {
   const [showVault,       setShowVault]       = useState(false);
   const [showAdminPanel,  setShowAdminPanel]  = useState(false);
   const [adminInfo,       setAdminInfo]       = useState(null); // { superAdmin, admins }
-  const [myAvatar,        setMyAvatar]        = useState(() => {
-    const session = loadSavedSession();
-    if (!session?.nickname) return null;
-    return localStorage.getItem(`echo_avatar_${session.nickname.toLowerCase()}`) || null;
-  });
+  const [sessionToken,    setSessionToken]    = useState(() => localStorage.getItem(SESSION_TOKEN));
+  const [myAvatar,        setMyAvatar]        = useState(null);
   const [derivingId,    setDerivingId]    = useState(null);
   const [deriveError,   setDeriveError]   = useState('');
 
@@ -191,8 +189,6 @@ function AppInner() {
 
     // Real-time avatar updates from other users
     socket.on('user_avatar_updated', ({ nick, avatar }) => {
-      // Update localStorage cache
-      localStorage.setItem('echo_avatar_' + nick.toLowerCase(), avatar || '');
       // Update DM list peer avatars
       setDmList(prev => prev.map(c =>
         c.otherNick?.toLowerCase() === nick.toLowerCase()
@@ -207,6 +203,24 @@ function AppInner() {
     });
 
     return () => socket.disconnect();
+  }, [account?.nickname]);
+
+  // Fetch admin info as soon as account loads (public endpoint, no auth needed)
+  useEffect(() => {
+    if (!account) return;
+    fetch('/admin/info')
+      .then(r => r.json())
+      .then(info => setAdminInfo(info))
+      .catch(() => {});
+  }, [account?.nickname]);
+
+  // Load own avatar from server on startup
+  useEffect(() => {
+    if (!account?.nickname) return;
+    fetch(`/users/avatar/${account.nickname}`)
+      .then(r => r.json())
+      .then(data => { if (data.avatar) setMyAvatar(data.avatar); })
+      .catch(() => {});
   }, [account?.nickname]);
 
   // Persist legacy chats
@@ -281,11 +295,6 @@ function AppInner() {
         // DM: one pubkey fetch per contact, do preview + avatar together
         Promise.all(dmsData.map(async (d) => {
           try {
-            const cached = localStorage.getItem('echo_avatar_' + d.other.toLowerCase());
-            if (cached) setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, peerAvatar: cached } : c));
-
-            if (!d.lastEncrypted && cached) return; // nothing more to do
-
             const pubRes  = await fetch(`/users/pubkey/${encodeURIComponent(d.other)}`);
             const pubData = await pubRes.json();
             if (!pubData.pubKey) return;
@@ -293,8 +302,7 @@ function AppInner() {
             const theirPub = await importPublicKey(pubData.pubKey);
 
             // Avatar
-            if (!cached && pubData.avatar) {
-              localStorage.setItem('echo_avatar_' + d.other.toLowerCase(), pubData.avatar);
+            if (pubData.avatar) {
               setDmList(prev => prev.map(c => c.id === d.dmId ? { ...c, peerAvatar: pubData.avatar } : c));
             }
 
@@ -349,6 +357,19 @@ function AppInner() {
       pubKeyB64:  accountData.pubKeyB64 || null,
     };
     saveSavedSession(toSave);
+    // Create server-side session token for privileged operations
+    if (accountData.passwordHash) {
+      fetch('/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nickname: accountData.nickname, passwordHash: accountData.passwordHash }),
+      }).then(r => r.json()).then(data => {
+        if (data.token) {
+          localStorage.setItem(SESSION_TOKEN, data.token);
+          setSessionToken(data.token);
+        }
+      }).catch(() => {});
+    }
     // Keep passwordHash in sessionStorage (survives refresh, cleared on tab close)
     if (accountData.passwordHash) sessionStorage.setItem(SESSION_HASH, accountData.passwordHash);
     setAccount({ ...toSave, passwordHash: accountData.passwordHash || null });
@@ -381,8 +402,6 @@ function AppInner() {
       await registerServiceWorker();
       subscribeToPush(nick).catch(() => {});
     }
-    // Fetch admin info
-    fetch('/admin/info').then(r => r.json()).then(info => setAdminInfo(info)).catch(() => {});
     // Load DMs and groups with key for preview decryption
     await loadDMsAndGroups(nick, privKey);
   }, [loadDMsAndGroups]);
@@ -405,7 +424,9 @@ function AppInner() {
     const nick = account?.nickname?.toLowerCase();
     if (nick) localStorage.removeItem(`echo_rawkey_${nick}`);
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_TOKEN);
     sessionStorage.removeItem(SESSION_HASH);
+    setSessionToken(null);
     setAccount(null);
     setPrivateKey(null);
     setNeedsUnlock(false);
@@ -769,7 +790,7 @@ function AppInner() {
         {showVault && adminInfo ? (
           <VaultPanel
             nickname={account.nickname}
-            passwordHash={account.passwordHash}
+            sessionToken={sessionToken}
             isSuperAdmin={adminInfo.superAdmin?.toLowerCase() === account.nickname.toLowerCase()}
             adminInfo={adminInfo}
             onManageAdmins={() => setShowAdminPanel(true)}
@@ -874,8 +895,7 @@ function AppInner() {
 
       {showAdminPanel && adminInfo && (
         <AdminPanel
-          nickname={account.nickname}
-          passwordHash={account.passwordHash}
+          sessionToken={sessionToken}
           adminInfo={adminInfo}
           onClose={() => setShowAdminPanel(false)}
           onUpdated={() => fetch('/admin/info').then(r => r.json()).then(setAdminInfo)}
