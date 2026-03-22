@@ -78,12 +78,12 @@ export default function UnlockScreen({ nickname, authSalt, onUnlocked, onLogout 
           body: JSON.stringify({ nickname, passwordHash, encryptedPrivKey: encPrivKey }),
         }).catch(() => {});
 
-        onUnlocked(keyPair.privateKey);
+        onUnlocked(keyPair.privateKey, passwordHash);
         return;
       }
 
       const privateKey = await decryptPrivateKey(encryptedJson, password);
-      onUnlocked(privateKey);
+      onUnlocked(privateKey, passwordHash);
     } catch (err) {
       setError(err.message || 'Неверный пароль');
     } finally {
