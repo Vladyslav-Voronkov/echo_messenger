@@ -24,6 +24,10 @@ export async function saveVaultMeta(encryptedBlob) {
   await fs.writeFile(META_FILE, encryptedBlob, 'utf8');
 }
 
+export function getVaultDir() {
+  return VAULT_DIR;
+}
+
 export function getVaultFilePath(fileId) {
   // Sanitize: only alphanumeric + dashes
   const safe = fileId.replace(/[^a-zA-Z0-9\-]/g, '');
