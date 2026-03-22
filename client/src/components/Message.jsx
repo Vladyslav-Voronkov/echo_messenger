@@ -5,6 +5,7 @@ import FileMessage from './FileMessage.jsx';
 import VoiceMessage from './VoiceMessage.jsx';
 import { getNickColor } from '../utils/nickColor.js';
 import { useTranslation, LOCALE_MAP } from '../utils/i18n.jsx';
+import AdminBadge, { getBadgeType } from './AdminBadge.jsx';
 
 function parseMessage(raw) {
   try {
@@ -47,7 +48,7 @@ const IconHeart = () => (
   </svg>
 );
 
-export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike, pins, onPin, senderAvatar = null }) {
+export default function Message({ message, onReply, onScrollToMessage, cryptoKey, highlighted, roomId, readReceipts, likes, onLike, pins, onPin, senderAvatar = null, adminInfo = null }) {
   const { t, lang } = useTranslation();
   // System notification messages (join/leave/pin)
   if (message.type === 'system') {
@@ -197,7 +198,10 @@ export default function Message({ message, onReply, onScrollToMessage, cryptoKey
 
       <div className="message-bubble" onDoubleClick={() => onLike(message)}>
         {!isOwn && (
-          <span className="message-nick" style={{ color: nickColor }}>{nick}</span>
+          <span className="message-nick" style={{ color: nickColor, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+            {nick}
+            {getBadgeType(nick, adminInfo) && <AdminBadge type={getBadgeType(nick, adminInfo)} size={11} />}
+          </span>
         )}
 
         {replyTo && (

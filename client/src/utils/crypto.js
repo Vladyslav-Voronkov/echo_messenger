@@ -377,3 +377,40 @@ export async function decryptFileFromBinary(key, ivB64, cipherBuffer) {
     cipherBuffer,
   );
 }
+
+// ── Vault key (shared admin encryption key) ───────────────────────────────────
+
+const VAULT_PBKDF2_SALT = new TextEncoder().encode('echo-vault-v1');
+const VAULT_PBKDF2_ITER = 200_000;
+
+export async function deriveVaultKey(passphrase) {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(passphrase), { name: 'PBKDF2' }, false, ['deriveKey'],
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: VAULT_PBKDF2_SALT, iterations: VAULT_PBKDF2_ITER, hash: 'SHA-256' },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+// Encrypt any JSON-serializable value → base64 string
+export async function encryptVaultData(key, data) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plain = new TextEncoder().encode(JSON.stringify(data));
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, tagLength: 128 }, key, plain);
+  return bufToB64(iv) + ':' + bufToB64(cipher);
+}
+
+// Decrypt base64 string → original value
+export async function decryptVaultData(key, encoded) {
+  const [ivB64, cipherB64] = encoded.split(':');
+  const plain = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: b64ToBuf(ivB64), tagLength: 128 },
+    key,
+    b64ToBuf(cipherB64),
+  );
+  return JSON.parse(new TextDecoder().decode(plain));
+}
