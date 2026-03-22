@@ -177,7 +177,7 @@ const IconUserPlus = () => (
   </svg>
 );
 
-export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, onUpdateChat, onToggleSidebar, onDMRequestAccepted, onDMAccepted, onInviteToGroup, onOpenGroupInfo, chatAvatar = null }) {
+export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, onUpdateChat, onToggleSidebar, onDMRequestAccepted, onDMAccepted, onInviteToGroup, onOpenGroupInfo, chatAvatar = null, adminInfo = null }) {
   const { nickname, cryptoKey, type: chatType = 'legacy', roomId, dmId, groupId } = session;
   const contextId = chatType === 'dm' ? dmId : chatType === 'group' ? groupId : roomId;
   const [isPendingDM, setIsPendingDM] = useState(!!session.isPending);
@@ -995,6 +995,7 @@ export default function ChatScreen({ session, chatName, onLeaveRoom, onLogout, o
                   pins={pins}
                   onPin={handlePin}
                   senderAvatar={!msg.isOwn && msg.nick ? (peerAvatars[msg.nick.toLowerCase()] || null) : null}
+                  adminInfo={adminInfo}
                 />
               </Fragment>
             );

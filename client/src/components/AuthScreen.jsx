@@ -100,10 +100,11 @@ export default function AuthScreen({ onAuth }) {
         }).catch(() => {});
 
         onAuth({
-          nickname:   data.nickname,
-          createdAt:  data.createdAt,
+          nickname:     data.nickname,
+          createdAt:    data.createdAt,
           authSalt,
           pubKeyB64,
+          passwordHash,
           privateKey: keyPair.privateKey, // pass in memory to App
         });
 
@@ -173,10 +174,11 @@ export default function AuthScreen({ onAuth }) {
               body: JSON.stringify({ nickname: nick, passwordHash, pubKey: pubKeyB64 }),
             });
             onAuth({
-              nickname:  data.nickname,
-              createdAt: data.createdAt,
-              authSalt:  authSalt,
+              nickname:     data.nickname,
+              createdAt:    data.createdAt,
+              authSalt:     authSalt,
               pubKeyB64,
+              passwordHash,
               privateKey: keyPair.privateKey,
             });
             return;
@@ -187,10 +189,11 @@ export default function AuthScreen({ onAuth }) {
         }
 
         onAuth({
-          nickname:   data.nickname,
-          createdAt:  data.createdAt,
-          authSalt:   data.authSalt,
-          pubKeyB64:  data.pubKey || null,
+          nickname:     data.nickname,
+          createdAt:    data.createdAt,
+          authSalt:     data.authSalt,
+          pubKeyB64:    data.pubKey || null,
+          passwordHash,
           privateKey, // '__needs_unlock__' or null
         });
       }

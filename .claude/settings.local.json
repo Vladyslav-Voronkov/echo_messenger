@@ -28,7 +28,9 @@
       "Bash(git -C C:UsersvladyDesktopCHAT diff --stat)",
       "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\vlady\\\\Desktop\\\\CHAT\\\\client\\\\src\\\\components\\\\Message.jsx'' | Select-Object -First 15\")",
       "Bash(powershell -Command:*)",
-      "Bash(git -C:*)"
+      "Bash(git -C:*)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(git checkout HEAD -- client/src/components/AlbumComposer.jsx)"
     ]
   }
 }

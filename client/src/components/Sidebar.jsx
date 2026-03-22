@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getNickColor } from '../utils/nickColor.js';
+import AdminBadge, { getBadgeType } from './AdminBadge.jsx';
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -101,9 +102,11 @@ function SectionHeader({ label, icon, onAdd, addTitle, collapsible, open, onTogg
   );
 }
 
-function ChatItem({ chat, isActive, isLoading, onSelect }) {
+function ChatItem({ chat, isActive, isLoading, onSelect, adminInfo }) {
   const isPending = chat.isPending;
   const color = getNickColor(chat.name || chat.id);
+  // Show badge for DM peer nicks
+  const peerBadge = chat.type === 'dm' ? getBadgeType(chat.name, adminInfo) : null;
   return (
     <button
       className={'sidebar-item' + (isActive ? ' sidebar-item--active' : '')}
@@ -125,6 +128,7 @@ function ChatItem({ chat, isActive, isLoading, onSelect }) {
           <span className="sidebar-item-name" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {isPending && <span style={{ fontSize: 9, background: '#f59e0b', color: '#000', borderRadius: 4, padding: '1px 4px', fontWeight: 700 }}>?</span>}
             {chat.name || 'Чат'}
+            {peerBadge && <AdminBadge type={peerBadge} size={11} />}
           </span>
           {chat.lastTs && <span className="sidebar-item-time">{formatTime(chat.lastTs)}</span>}
         </div>
@@ -141,9 +145,18 @@ function ChatItem({ chat, isActive, isLoading, onSelect }) {
   );
 }
 
+const IconVault = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0110 0v4"/>
+    <circle cx="12" cy="16" r="1" fill="currentColor"/>
+  </svg>
+);
+
 export default function Sidebar({
   account,
   myAvatar,
+  adminInfo,
   dmList,
   groupList,
   legacyList,
@@ -156,8 +169,10 @@ export default function Sidebar({
   onNewLegacy,
   onLogout,
   onOpenProfile,
+  onOpenVault,
 }) {
   const nickColor = getNickColor(account?.nickname || '');
+  const myBadge = getBadgeType(account?.nickname, adminInfo);
   const [showLegacy, setShowLegacy] = useState(true);
   // Force re-render every minute so relative timestamps ("2 мин") stay fresh
   const [, setTick] = useState(0);
@@ -187,9 +202,17 @@ export default function Sidebar({
               : account?.nickname?.[0]?.toUpperCase() || '?'
             }
           </div>
-          <span className="sidebar-nickname">{account?.nickname}</span>
+          <span className="sidebar-nickname" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {account?.nickname}
+            {myBadge && <AdminBadge type={myBadge} size={13} />}
+          </span>
         </div>
         <div className="sidebar-header-btns">
+          {onOpenVault && (
+            <button className="sidebar-icon-btn sidebar-icon-btn--vault" onClick={onOpenVault} title="Хранилище">
+              <IconVault />
+            </button>
+          )}
           <button className="sidebar-icon-btn sidebar-icon-btn--danger" onClick={onLogout} title="Выйти">
             <IconLogout />
           </button>
@@ -251,6 +274,7 @@ export default function Sidebar({
                 isActive={activeChatId === chat.id}
                 isLoading={derivingId === chat.id}
                 onSelect={onSelectChat}
+                adminInfo={adminInfo}
               />
             ))}
           </>

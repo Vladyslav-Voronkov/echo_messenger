@@ -11,6 +11,9 @@ import UserSearchModal  from './components/UserSearchModal.jsx';
 import GroupCreateModal from './components/GroupCreateModal.jsx';
 import GroupInfoPanel   from './components/GroupInfoPanel.jsx';
 import ProfileModal     from './components/ProfileModal.jsx';
+import VaultPanel       from './components/VaultPanel.jsx';
+import AdminPanel       from './components/AdminPanel.jsx';
+import AdminBadge, { getBadgeType } from './components/AdminBadge.jsx';
 import {
   deriveRoomId, deriveKey,
   importPublicKey, exportPublicKey, generateECDHKeyPair, encryptPrivateKey,
@@ -93,6 +96,9 @@ function AppInner() {
   const [showGroupInvite, setShowGroupInvite] = useState(false);
   const [showGroupInfo,   setShowGroupInfo]   = useState(false);
   const [showProfile,     setShowProfile]     = useState(false);
+  const [showVault,       setShowVault]       = useState(false);
+  const [showAdminPanel,  setShowAdminPanel]  = useState(false);
+  const [adminInfo,       setAdminInfo]       = useState(null); // { superAdmin, admins }
   const [myAvatar,        setMyAvatar]        = useState(() => {
     const session = loadSavedSession();
     if (!session?.nickname) return null;
@@ -336,7 +342,8 @@ function AppInner() {
       pubKeyB64:  accountData.pubKeyB64 || null,
     };
     saveSavedSession(toSave);
-    setAccount(toSave);
+    // Keep passwordHash in memory only (not localStorage) for vault/admin auth
+    setAccount({ ...toSave, passwordHash: accountData.passwordHash || null });
     setLegacyList(loadLegacyChats(accountData.nickname));
 
     // If registration — private key is already in memory
@@ -366,6 +373,8 @@ function AppInner() {
       await registerServiceWorker();
       subscribeToPush(nick).catch(() => {});
     }
+    // Fetch admin info
+    fetch('/admin/info').then(r => r.json()).then(info => setAdminInfo(info)).catch(() => {});
     // Load DMs and groups with key for preview decryption
     await loadDMsAndGroups(nick, privKey);
   }, [loadDMsAndGroups]);
@@ -512,6 +521,7 @@ function AppInner() {
 
   // ── Select chat from sidebar ──────────────────────────────────────────────────
   const handleSelectChat = useCallback((chat) => {
+    setShowVault(false);
     if (chat.id === activeChatId) { setShowSidebar(false); return; }
     if (chat.type === 'dm')     return openDM(chat);
     if (chat.type === 'group')  return openGroup(chat);
@@ -723,6 +733,7 @@ function AppInner() {
         <Sidebar
           account={account}
           myAvatar={myAvatar}
+          adminInfo={adminInfo}
           dmList={dmList}
           groupList={groupList}
           legacyList={legacyList}
@@ -735,6 +746,7 @@ function AppInner() {
           onNewLegacy={() => { setDeriveError(''); setShowNewLegacy(true); }}
           onLogout={handleLogout}
           onOpenProfile={() => setShowProfile(true)}
+          onOpenVault={adminInfo ? () => { setShowVault(true); setActiveChatId(null); setActiveSession(null); } : undefined}
         />
       </div>
 
@@ -745,7 +757,15 @@ function AppInner() {
 
       {/* ── Main area ── */}
       <div className="app-main">
-        {activeSession ? (
+        {showVault && adminInfo ? (
+          <VaultPanel
+            nickname={account.nickname}
+            passwordHash={account.passwordHash}
+            isSuperAdmin={adminInfo.superAdmin?.toLowerCase() === account.nickname.toLowerCase()}
+            adminInfo={adminInfo}
+            onManageAdmins={() => setShowAdminPanel(true)}
+          />
+        ) : activeSession ? (
           <ChatScreen
             key={activeSession.chatId}
             session={activeSession}
@@ -764,8 +784,9 @@ function AppInner() {
               ? (groupList.find(c => c.id === activeChatId)?.avatar || null)
               : null
             }
+            adminInfo={adminInfo}
           />
-        ) : (
+        ) : !showVault ? (
           <div className="app-welcome">
             <div className="app-welcome-inner">
               <div className="app-welcome-logo">EM</div>
@@ -784,7 +805,7 @@ function AppInner() {
               {deriveError && <p className="login-error" style={{ marginTop: 12 }}>{deriveError}</p>}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* ── Modals ── */}
@@ -839,6 +860,16 @@ function AppInner() {
           currentAvatar={myAvatar}
           onClose={() => setShowProfile(false)}
           onAvatarUpdated={(b64) => setMyAvatar(b64)}
+        />
+      )}
+
+      {showAdminPanel && adminInfo && (
+        <AdminPanel
+          nickname={account.nickname}
+          passwordHash={account.passwordHash}
+          adminInfo={adminInfo}
+          onClose={() => setShowAdminPanel(false)}
+          onUpdated={() => fetch('/admin/info').then(r => r.json()).then(setAdminInfo)}
         />
       )}
 

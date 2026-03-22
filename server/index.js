@@ -15,6 +15,8 @@ import { initApns, registerApnsToken, removeApnsToken, sendApnsPush } from './ap
 import { initPush, getVapidPublicKey, addSubscription, removeSubscription, sendPush } from './pushService.js';
 import { initDM, getDmId, createDM, acceptDM, declineDM, createRequest, getRequests, listDMs, listSentRequests, getConversation, appendDmMessage, readDmHistory } from './dmManager.js';
 import { initGroups, loadGroup, saveGroup, createGroup, inviteToGroup, acceptGroupInvite, declineGroupInvite, listGroupsForNick, appendGroupMessage, readGroupHistory, isMember, isValidGroupId, getGroupFilePath, renameGroup, removeMemberFromGroup, setGroupAvatar } from './groupManager.js';
+import { initAdmins, isSuperAdmin, isAdmin, getAdminInfo, grantAdmin, revokeAdmin } from './admins.js';
+import { initVault, getVaultMeta, saveVaultMeta, getVaultFilePath, deleteVaultFile } from './vaultManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,6 +36,8 @@ await fs.mkdir(FILES_DIR, { recursive: true });
 await initPush(DATA_DIR);
 await initDM(DATA_DIR);
 await initGroups(DATA_DIR);
+await initAdmins(DATA_DIR);
+await initVault(DATA_DIR);
 initApns();
 
 // ── Express app ───────────────────────────────────────────────────────────────
@@ -63,7 +67,7 @@ app.use(helmet({
 app.use(cors({
   origin: (origin, cb) => cb(null, true),
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'x-file-meta', 'x-nickname'],
+  allowedHeaders: ['Content-Type', 'x-file-meta', 'x-nickname', 'x-password-hash'],
 }));
 app.options('*', cors());
 
@@ -898,6 +902,129 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(CLIENT_DIST, 'index.html'), (err) => {
     if (err) res.status(404).end();
   });
+});
+
+// ── Admin routes ──────────────────────────────────────────────────────────────
+
+// GET /admin/info — public: returns superAdmin nick + admin list
+app.get('/admin/info', (_req, res) => {
+  res.json(getAdminInfo());
+});
+
+// POST /admin/grant — superAdmin grants admin to another nick
+app.post('/admin/grant', apiLimiter, async (req, res) => {
+  const { nickname, passwordHash, targetNick } = req.body || {};
+  if (!isValidNick(nickname) || !isValidHash(passwordHash) || !isValidNick(targetNick)) {
+    return res.status(400).json({ error: 'Неверные параметры' });
+  }
+  if (!isSuperAdmin(nickname)) return res.status(403).json({ error: 'Нет прав' });
+  const accounts = await loadAccounts();
+  const account = accounts[nickname.toLowerCase()];
+  if (!account || account.passwordHash !== passwordHash) {
+    return res.status(401).json({ error: 'Неверный пароль' });
+  }
+  await grantAdmin(targetNick);
+  res.json({ ok: true });
+});
+
+// POST /admin/revoke — superAdmin revokes admin from a nick
+app.post('/admin/revoke', apiLimiter, async (req, res) => {
+  const { nickname, passwordHash, targetNick } = req.body || {};
+  if (!isValidNick(nickname) || !isValidHash(passwordHash) || !isValidNick(targetNick)) {
+    return res.status(400).json({ error: 'Неверные параметры' });
+  }
+  if (!isSuperAdmin(nickname)) return res.status(403).json({ error: 'Нет прав' });
+  const accounts = await loadAccounts();
+  const account = accounts[nickname.toLowerCase()];
+  if (!account || account.passwordHash !== passwordHash) {
+    return res.status(401).json({ error: 'Неверный пароль' });
+  }
+  await revokeAdmin(targetNick);
+  res.json({ ok: true });
+});
+
+// ── Vault routes ──────────────────────────────────────────────────────────────
+
+// Helper: verify admin auth from request body
+async function verifyAdminAuth(nickname, passwordHash) {
+  if (!isValidNick(nickname) || !isValidHash(passwordHash)) return false;
+  if (!isAdmin(nickname)) return false;
+  const accounts = await loadAccounts();
+  const account = accounts[nickname.toLowerCase()];
+  return account && account.passwordHash === passwordHash;
+}
+
+// Multer storage for vault files (stored encrypted, opaque bytes)
+const vaultStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const vaultDir = getVaultFilePath('').replace(/[^/]+$/, '');
+    cb(null, vaultDir);
+  },
+  filename: (req, _file, cb) => {
+    const safe = (req.params.fileId || '').replace(/[^a-zA-Z0-9\-]/g, '');
+    cb(null, safe);
+  },
+});
+const vaultUpload = multer({ storage: vaultStorage, limits: { fileSize: 500 * 1024 * 1024 } });
+
+// GET /vault/meta — returns encrypted metadata blob
+app.get('/vault/meta', apiLimiter, async (req, res) => {
+  const nick = (req.headers['x-nickname'] || '').toLowerCase();
+  const hash = req.headers['x-password-hash'] || '';
+  if (!(await verifyAdminAuth(nick, hash))) return res.status(403).json({ error: 'Нет прав' });
+  const meta = await getVaultMeta();
+  if (!meta) return res.json({ meta: null });
+  res.json({ meta });
+});
+
+// POST /vault/meta — saves encrypted metadata blob
+app.post('/vault/meta', apiLimiter, express.json({ limit: '10mb' }), async (req, res) => {
+  const { nickname, passwordHash, meta } = req.body || {};
+  if (!(await verifyAdminAuth(nickname, passwordHash))) return res.status(403).json({ error: 'Нет прав' });
+  if (typeof meta !== 'string') return res.status(400).json({ error: 'meta required' });
+  await saveVaultMeta(meta);
+  res.json({ ok: true });
+});
+
+// POST /vault/upload/:fileId — upload encrypted file
+app.post('/vault/upload/:fileId', apiLimiter, (req, res, next) => {
+  const nick = (req.headers['x-nickname'] || '').toLowerCase();
+  const hash = req.headers['x-password-hash'] || '';
+  verifyAdminAuth(nick, hash).then(ok => {
+    if (!ok) return res.status(403).json({ error: 'Нет прав' });
+    next();
+  });
+}, vaultUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
+  res.json({ ok: true });
+});
+
+// GET /vault/file/:fileId — download encrypted file
+app.get('/vault/file/:fileId', async (req, res) => {
+  const nick = (req.headers['x-nickname'] || '').toLowerCase();
+  const hash = req.headers['x-password-hash'] || '';
+  if (!(await verifyAdminAuth(nick, hash))) return res.status(403).json({ error: 'Нет прав' });
+  const filePath = getVaultFilePath(req.params.fileId);
+  try {
+    const stat = await fs.stat(filePath);
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    createReadStream(filePath).pipe(res);
+  } catch {
+    res.status(404).json({ error: 'Файл не найден' });
+  }
+});
+
+// DELETE /vault/file/:fileId — delete file
+app.delete('/vault/file/:fileId', apiLimiter, express.json({ limit: '1kb' }), async (req, res) => {
+  const { nickname, passwordHash } = req.body || {};
+  if (!(await verifyAdminAuth(nickname, passwordHash))) return res.status(403).json({ error: 'Нет прав' });
+  try {
+    await deleteVaultFile(req.params.fileId);
+    res.json({ ok: true });
+  } catch {
+    res.status(404).json({ error: 'Файл не найден' });
+  }
 });
 
 // ── Socket.io ─────────────────────────────────────────────────────────────────
