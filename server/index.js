@@ -16,7 +16,7 @@ import { initPush, getVapidPublicKey, addSubscription, removeSubscription, sendP
 import { initDM, getDmId, createDM, acceptDM, declineDM, createRequest, getRequests, listDMs, listSentRequests, getConversation, appendDmMessage, readDmHistory } from './dmManager.js';
 import { initGroups, loadGroup, saveGroup, createGroup, inviteToGroup, acceptGroupInvite, declineGroupInvite, listGroupsForNick, appendGroupMessage, readGroupHistory, isMember, isValidGroupId, getGroupFilePath, renameGroup, removeMemberFromGroup, setGroupAvatar } from './groupManager.js';
 import { initAdmins, isSuperAdmin, isAdmin, getAdminInfo, grantAdmin, revokeAdmin } from './admins.js';
-import { initVault, getVaultMeta, saveVaultMeta, getVaultFilePath, deleteVaultFile } from './vaultManager.js';
+import { initVault, getVaultMeta, saveVaultMeta, getVaultFilePath, getVaultDir, deleteVaultFile } from './vaultManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -956,10 +956,7 @@ async function verifyAdminAuth(nickname, passwordHash) {
 
 // Multer storage for vault files (stored encrypted, opaque bytes)
 const vaultStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    const vaultDir = getVaultFilePath('').replace(/[^/]+$/, '');
-    cb(null, vaultDir);
-  },
+  destination: (_req, _file, cb) => cb(null, getVaultDir()),
   filename: (req, _file, cb) => {
     const safe = (req.params.fileId || '').replace(/[^a-zA-Z0-9\-]/g, '');
     cb(null, safe);
