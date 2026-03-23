@@ -65,13 +65,15 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false, // Allow SharedArrayBuffer if needed
 }));
 
-// CORS — allow same origin + dev
-app.use(cors({
-  origin: (origin, cb) => cb(null, true),
-  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'x-file-meta', 'x-nickname', 'x-password-hash', 'x-session-token'],
-}));
-app.options('*', cors());
+// CORS — allow all origins (web + native iOS/Android)
+const corsOptions = {
+  origin: (origin, cb) => cb(null, origin || '*'),
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-file-meta', 'x-nickname', 'x-password-hash', 'x-session-token', 'Authorization'],
+  credentials: true,
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json({ limit: '64kb' }));
 
@@ -1055,8 +1057,9 @@ const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: (origin, cb) => cb(null, true),
-    methods: ['GET', 'POST'],
+    origin: (origin, cb) => cb(null, origin || '*'),
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true,
   },
   transports: ['websocket', 'polling'],
   maxHttpBufferSize: 1e6,
