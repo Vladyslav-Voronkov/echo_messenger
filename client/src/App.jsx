@@ -206,12 +206,17 @@ function AppInner() {
   }, [account?.nickname]);
 
   // Fetch admin info as soon as account loads (public endpoint, no auth needed)
+  // Retry a few times in case server is still starting up
   useEffect(() => {
     if (!account) return;
-    fetch('/admin/info')
-      .then(r => r.json())
-      .then(info => setAdminInfo(info))
-      .catch(() => {});
+    let attempts = 0;
+    const tryFetch = () => {
+      fetch('/admin/info')
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(info => { if (info?.superAdmin) setAdminInfo(info); })
+        .catch(() => { if (++attempts < 5) setTimeout(tryFetch, 3000); });
+    };
+    tryFetch();
   }, [account?.nickname]);
 
   // Load own avatar from server on startup
@@ -395,14 +400,42 @@ function AppInner() {
   }, [loadDMsAndGroups]);
 
   const afterKeyUnlocked = useCallback(async (nick, privKey) => {
-    // Register for push notifications (native iOS or web)
+    const storedHash = sessionStorage.getItem(SESSION_HASH);
+
+    // 1. Ensure session token exists (needed for admin/vault)
+    //    Create one if we have passwordHash but no token yet
+    const existingToken = localStorage.getItem(SESSION_TOKEN);
+    if (storedHash && !existingToken) {
+      fetch('/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nickname: nick, passwordHash: storedHash }),
+      }).then(r => r.json()).then(data => {
+        if (data.token) {
+          localStorage.setItem(SESSION_TOKEN, data.token);
+          setSessionToken(data.token);
+        }
+      }).catch(() => {});
+    }
+
+    // 2. Sync encrypted private key to server (enables cross-device / incognito access)
+    const encKey = localStorage.getItem(`echo_privkey_${nick.toLowerCase()}`);
+    if (encKey && storedHash) {
+      fetch('/auth/save-encrypted-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nickname: nick, passwordHash: storedHash, encryptedPrivKey: encKey }),
+      }).catch(() => {});
+    }
+
+    // 3. Register for push notifications (native iOS or web)
     if (isRunningNative()) {
       registerNativePush(nick).catch(() => {});
     } else {
       await registerServiceWorker();
       subscribeToPush(nick).catch(() => {});
     }
-    // Load DMs and groups with key for preview decryption
+    // 4. Load DMs and groups with key for preview decryption
     await loadDMsAndGroups(nick, privKey);
   }, [loadDMsAndGroups]);
 
@@ -413,10 +446,12 @@ function AppInner() {
       .catch(() => {});
   }, []);
 
-  const handleUnlocked = useCallback(async (privKey) => {
+  const handleUnlocked = useCallback(async (privKey, passwordHash) => {
     setPrivateKey(privKey);
     setNeedsUnlock(false);
     if (privKey) cachePrivateKey(account?.nickname, privKey);
+    // Store passwordHash so afterKeyUnlocked can create session token + sync key
+    if (passwordHash) sessionStorage.setItem(SESSION_HASH, passwordHash);
     await afterKeyUnlocked(account?.nickname, privKey);
   }, [account, afterKeyUnlocked, cachePrivateKey]);
 
