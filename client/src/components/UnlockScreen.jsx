@@ -35,18 +35,15 @@ export default function UnlockScreen({ nickname, authSalt, onUnlocked, onLogout 
       const storageKey    = `echo_privkey_${nickname.toLowerCase()}`;
       const encryptedJson = localStorage.getItem(storageKey);
 
+      // Derive passwordHash upfront (needed in both branches)
+      const salt = authSalt || await fetch(`/auth/salt/${encodeURIComponent(nickname)}`)
+        .then(r => r.json()).then(d => d.authSalt);
+      if (!salt) throw new Error('Не удалось получить данные аккаунта');
+      const passwordHash = await derivePasswordHash(password, salt);
+
       if (!encryptedJson) {
         // No local key — generate a new ECDH key pair for this device
         setStatusMsg('Генерация ключей шифрования...');
-
-        if (!authSalt) {
-          // Fetch authSalt from server if not in session
-          const saltRes = await fetch(`/auth/salt/${encodeURIComponent(nickname)}`);
-          if (!saltRes.ok) throw new Error('Не удалось получить данные аккаунта');
-        }
-
-        const salt = authSalt || (() => { throw new Error('Нет authSalt'); })();
-        const passwordHash = await derivePasswordHash(password, salt);
 
         // Verify password against server before generating new keys
         setStatusMsg('Проверка пароля...');
