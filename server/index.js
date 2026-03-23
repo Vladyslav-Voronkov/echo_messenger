@@ -489,6 +489,7 @@ app.post('/dm/request', apiLimiter, async (req, res) => {
         url:   '/',
         tag:   `dm-request-${dmId}`,
       }).catch(() => {});
+      sendApnsPush(toNick.toLowerCase(), `@${fromNick}`, 'Хочет написать вам сообщение', { dmId }).catch(() => {});
     }
     return res.json({ ok: true, dmId });
   } catch (err) {
@@ -615,6 +616,7 @@ app.post('/groups/invite', apiLimiter, async (req, res) => {
       url:   '/',
       tag:   `group-invite-${groupId}`,
     }).catch(() => {});
+    sendApnsPush(toNick.toLowerCase(), `Приглашение в группу`, `@${fromNick} приглашает вас в "${group?.name || 'группу'}"`, { groupId }).catch(() => {});
     // Socket notify if online
     io.to(`user:${toNick.toLowerCase()}`).emit('group_invite_notify', {
       groupId,
